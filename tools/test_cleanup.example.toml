@@ -1,0 +1,86 @@
+[scan]
+root = "tests"
+include = ["test_*.py", "*_test.py"]
+exclude = [
+  "__pycache__/**",
+  "**/__pycache__/**",
+  "_archive/**",
+  "**/_archive/**",
+  "_cleanup_reports/**",
+  "**/_cleanup_reports/**",
+]
+
+[decision]
+min_score = 3
+comment_lookback_lines = 4
+require_all_test_cases = true
+allow_file_level_cleanup = true
+
+[archive]
+root = "tests/_archive"
+report_root = "tests/_cleanup_reports"
+purge_after_days = 30
+
+[rules.age]
+enabled = true
+stale_days = 180
+score = 1
+
+[rules.decorators]
+enabled = true
+candidate = [
+  "deprecated_test",
+  "obsolete_test",
+  "cleanup_candidate",
+  "pytest.mark.expired",
+  "pytest.mark.deprecated",
+  "pytest.mark.cleanup_candidate",
+]
+protect = [
+  "do_not_cleanup",
+  "pytest.mark.keep",
+  "pytest.mark.smoke",
+  "pytest.mark.critical",
+]
+score = 4
+
+[rules.comments]
+enabled = true
+candidate_keywords = [
+  "cleanup: obsolete",
+  "cleanup: expired",
+  "cleanup: deprecated",
+  "status: obsolete",
+  "status: deprecated",
+]
+protect_keywords = [
+  "cleanup: keep",
+  "do-not-cleanup",
+  "active-test",
+]
+score = 3
+
+[rules.expiry]
+enabled = true
+score = 5
+date_patterns = [
+  '(?i)cleanup:\s*expire(?:-on)?\s*=\s*(?P<date>\d{4}-\d{2}-\d{2})',
+  '(?i)@expires\s*(?P<date>\d{4}-\d{2}-\d{2})',
+  '(?i)TODO_REMOVE_BEFORE\s*(?P<date>\d{4}-\d{2}-\d{2})',
+]
+
+[rules.paths]
+enabled = true
+candidate = [
+  "legacy/**",
+  "**/legacy/**",
+  "deprecated/**",
+  "**/deprecated/**",
+]
+protect = [
+  "smoke/**",
+  "**/smoke/**",
+  "sanity/**",
+  "**/sanity/**",
+]
+score = 2

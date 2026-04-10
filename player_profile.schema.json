@@ -1,0 +1,315 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://stagebound.local/schemas/player_profile.schema.json",
+  "title": "CharacterProfile",
+  "description": "Unified character profile for player, base ActorAgent templates, L2 agents, and L1 agents.",
+  "type": "object",
+  "properties": {
+    "character_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "gender": {
+      "type": "string"
+    },
+    "race": {
+      "type": "string"
+    },
+    "background": {
+      "type": "string"
+    },
+    "story_role": {
+      "type": "string"
+    },
+    "introduction_hint": {
+      "type": "string"
+    },
+    "planned_chapter_count": {
+      "type": "integer",
+      "minimum": 0,
+      "default": 0
+    },
+    "planned_chapter_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": []
+    },
+    "profile_source": {
+      "type": "string"
+    },
+    "occupation": {
+      "type": "string",
+      "default": ""
+    },
+    "spiritual_root": {
+      "type": "string",
+      "default": "mixed_root"
+    },
+    "realm": {
+      "type": "string",
+      "default": "qi_refining_1"
+    },
+    "main_technique": {
+      "type": "string",
+      "default": "basic_breathing_art"
+    },
+    "persona": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": []
+    },
+    "base_style": {
+      "type": "string",
+      "default": ""
+    },
+    "agent_type": {
+      "type": "string",
+      "enum": ["actor", "L2", "L1"],
+      "default": "actor",
+      "description": "Execution tier for the runtime agent."
+    },
+    "story_layer": {
+      "type": "string",
+      "enum": ["player", "actor", "L2", "L1"],
+      "description": "Narrative storage layer. Base NPC-like roles are represented as `actor` ActorAgents."
+    },
+    "storage_mode": {
+      "type": "string",
+      "enum": ["player_bound_instance", "shared_template"],
+      "description": "Player/L1/L2 are player-bound instances; base ActorAgent roles are shared templates."
+    },
+    "is_active": {
+      "type": "boolean",
+      "default": true
+    },
+    "is_offstage": {
+      "type": "boolean",
+      "default": false
+    },
+    "l2_profile": {
+      "$ref": "#/$defs/l2AgentProfile"
+    },
+    "l1_profile": {
+      "$ref": "#/$defs/l1AgentProfile"
+    },
+    "layer_assignment": {
+      "$ref": "#/$defs/layerAssignment"
+    },
+    "memory_profile": {
+      "$ref": "#/$defs/characterMemoryConfig"
+    },
+    "base_relationship": {
+      "type": "object",
+      "default": {},
+      "additionalProperties": {
+        "type": "number"
+      }
+    },
+    "secrets": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": []
+    },
+    "backpack": {
+      "type": "array",
+      "default": [],
+      "description": "Player inventory. Other roles may keep this empty.",
+      "items": {
+        "$ref": "#/$defs/backpackItem"
+      }
+    }
+  },
+  "required": [
+    "character_id",
+    "name",
+    "persona",
+    "base_style",
+    "agent_type",
+    "story_layer",
+    "storage_mode",
+    "base_relationship",
+    "secrets",
+    "spiritual_root",
+    "realm",
+    "main_technique",
+    "memory_profile",
+    "is_active",
+    "is_offstage"
+  ],
+  "additionalProperties": true,
+  "$defs": {
+    "backpackItem": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "quantity": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "required": ["id", "name", "quantity"],
+      "additionalProperties": false
+    },
+    "l2AgentProfile": {
+      "type": "object",
+      "properties": {
+        "core_drive": {
+          "type": "string"
+        },
+        "judgement_preference": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 2
+        },
+        "behavior_rule": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 2
+        },
+        "speech_style": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 2
+        },
+        "personality_tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "core_drive",
+        "judgement_preference",
+        "behavior_rule",
+        "speech_style",
+        "personality_tags"
+      ],
+      "additionalProperties": false
+    },
+    "l1AgentProfile": {
+      "type": "object",
+      "properties": {
+        "core_conflict": {
+          "type": "string"
+        },
+        "outer_goal": {
+          "type": "string"
+        },
+        "inner_need": {
+          "type": "string"
+        },
+        "contradiction_axes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "relationship_pressure": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "core_conflict",
+        "outer_goal",
+        "inner_need",
+        "contradiction_axes",
+        "relationship_pressure"
+      ],
+      "additionalProperties": false
+    },
+    "layerAssignment": {
+      "type": "object",
+      "properties": {
+        "mentioned_in_player_backstory": {
+          "type": "boolean"
+        },
+        "plot_significance": {
+          "type": "string",
+          "enum": ["core", "supporting", "replaceable"]
+        },
+        "relationship_depth": {
+          "type": "string",
+          "enum": ["deep", "functional", "unknown"]
+        },
+        "long_term_plot_significance": {
+          "type": "boolean"
+        },
+        "can_promote_to_l1": {
+          "type": "boolean"
+        },
+        "assignment_reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "mentioned_in_player_backstory",
+        "plot_significance",
+        "relationship_depth",
+        "long_term_plot_significance",
+        "can_promote_to_l1",
+        "assignment_reason"
+      ],
+      "additionalProperties": false
+    },
+    "characterMemoryConfig": {
+      "type": "object",
+      "properties": {
+        "long_term_limit": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "short_term_limit": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "player_memory_limit": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "long_term_depth": {
+          "type": "string",
+          "enum": ["full", "compact"]
+        },
+        "player_memory_depth": {
+          "type": "string",
+          "enum": ["full", "compact"]
+        }
+      },
+      "required": [
+        "long_term_limit",
+        "short_term_limit",
+        "player_memory_limit",
+        "long_term_depth",
+        "player_memory_depth"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

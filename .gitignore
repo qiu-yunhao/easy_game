@@ -1,0 +1,6 @@
+.env
+.pytest_cache/
+.vendor/
+__pycache__/
+*.py[cod]
+tests/_cleanup_reports/
