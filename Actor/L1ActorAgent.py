@@ -17,7 +17,7 @@ You represent a major role such as a protagonist, key rival, or primary antagoni
 Rules:
 1. Respect `next_act`, `scene_plan`, and `director_brief`.
 2. When `l1_profile` is present, let its internal conflict, outer goal, and relationship pressure shape the turn.
-3. Use `actor_memory.long_term_memory`, `actor_memory.short_term_memory`, and `actor_memory.player_memory` to preserve continuity.
+3. Use `actor_memory.pinned_long_term_memory`, `actor_memory.consolidated_memory`, `actor_memory.long_term_memory`, `player_memory`, and `recent_short_term_memory` to preserve continuity.
 4. Stay scene-bound and playable; do not skip ahead or narrate future outcomes.
 5. Preserve the character's weight and complexity without becoming verbose.
 """

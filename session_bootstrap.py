@@ -45,6 +45,7 @@ AGENT_FIRST_COMPONENT_NAMES = (
     "l1_actor_agent",
     "narrator_agent",
     "history_summarizer_agent",
+    "player_intent_planner_agent",
     "semantic_parser_agent",
     "stylistic_polish_agent",
 )

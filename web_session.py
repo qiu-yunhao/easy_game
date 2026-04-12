@@ -19,12 +19,13 @@ from Narrator.NarrationPresets import (
     NARRATION_STYLE_GUIDANCE,
     resolve_narration_style_preset,
 )
-from PlayerControl import BufferedPlayerInterface, build_heuristic_player_resolved_act
+from PlayerControl import BufferedPlayerInterface
 from PlayerControl.PlayerCommandTools import (
     PlayerCommandToolRuntime,
     looks_like_tool_request,
     normalize_tool_call,
 )
+from PlayerControl.PlayerIntentPlannerAgent import build_heuristic_player_intent_plan
 from ResolvedActUtils import build_resolved_act_payload
 from session_bootstrap import (
     PLAYER_CHARACTER_ID,
@@ -365,7 +366,7 @@ class WebGameSession:
             self._advance_until_player_turn()
             if not is_player_turn(self.state):
                 raise RuntimeError("当前还没有轮到玩家行动。")
-            tool_response = self._maybe_handle_player_tool_request_unlocked(raw_input)
+            tool_response = self._maybe_handle_player_intent_plan_unlocked(raw_input)
             if tool_response is not None:
                 return tool_response
             self._player_interface.push_action(raw_input)
@@ -373,20 +374,52 @@ class WebGameSession:
             self.last_handoff_reason = self._advance_until_player_turn()
             return self.serialize_state()
 
-    def _maybe_handle_player_tool_request_unlocked(self, raw_input: str) -> dict[str, Any] | None:
+    def _maybe_handle_player_intent_plan_unlocked(self, raw_input: str) -> dict[str, Any] | None:
         if not looks_like_tool_request(raw_input) or self.deps.player_command_tools is None:
             return None
-        semantic_parser_agent = self.deps.semantic_parser_agent
-        parsed_act = (
-            semantic_parser_agent.parse_action(raw_input=raw_input, state=self.state, character_profiles=self.deps.character_profiles)
-            if semantic_parser_agent is not None
-            else build_heuristic_player_resolved_act(raw_input=raw_input, state=self.state, character_profiles=self.deps.character_profiles)
+        planner_agent = self.deps.player_intent_planner_agent
+        plan = (
+            planner_agent.plan_action(raw_input=raw_input, state=self.state, character_profiles=self.deps.character_profiles)
+            if planner_agent is not None
+            else build_heuristic_player_intent_plan(raw_input, character_profiles=self.deps.character_profiles)
         )
-        tool_call = normalize_tool_call(parsed_act.get("tool_call") if isinstance(parsed_act, dict) else None)
-        if not tool_call["should_call"]:
+        planned_steps = list(plan.get("planned_steps", [])) if isinstance(plan, dict) else []
+        if not any(step.get("kind") == "tool_call" for step in planned_steps if isinstance(step, dict)):
             return None
-        result = self.deps.player_command_tools.execute(tool_call)
-        self._append_tool_message_unlocked(raw_input=raw_input, parsed_act=parsed_act, result=result)
+
+        executed = False
+        for step in planned_steps[:5]:
+            if not isinstance(step, dict):
+                continue
+            if step.get("kind") == "tool_call":
+                tool_call = normalize_tool_call(step.get("tool_call") if isinstance(step.get("tool_call"), dict) else None)
+                if not tool_call["should_call"]:
+                    continue
+                parsed_act = build_resolved_act_payload(
+                    actor=(self.state["runtime"].get("next_act") or {}).get("actor"),
+                    mode="event",
+                    target=None,
+                    content=str(step.get("content") or raw_input).strip() or raw_input,
+                )
+                parsed_act["tool_call"] = tool_call
+                parsed_act["planned_steps"] = planned_steps
+                result = self.deps.player_command_tools.execute(tool_call)
+                self._append_tool_message_unlocked(raw_input=raw_input, parsed_act=parsed_act, result=result)
+                executed = True
+                if not result.get("success", False):
+                    break
+            else:
+                action_text = str(step.get("content") or "").strip()
+                if not action_text:
+                    continue
+                self._player_interface.push_action(action_text)
+                self.state = resolve_story_turn(self.state, self.deps)
+                self.last_handoff_reason = self._advance_until_player_turn()
+                executed = True
+                if self.state["runtime"].get("scene_finished", False):
+                    break
+        if not executed:
+            return None
         return self.serialize_state()
 
     def _append_tool_message_unlocked(
@@ -495,7 +528,10 @@ class WebGameSession:
                 agent.bind_character_roster_tool_runtime(character_roster_tool_runtime)
         if self.config.mode in {"agent-first", "live"} and self.deps.semantic_parser_agent is None:
             self.deps.semantic_parser_agent = self.deps.component_factory.build_semantic_parser_agent()
-            warm_model_clients(self.deps.semantic_parser_agent)
+        if self.config.mode in {"agent-first", "live"} and self.deps.player_intent_planner_agent is None:
+            self.deps.player_intent_planner_agent = self.deps.component_factory.build_player_intent_planner_agent()
+        if self.config.mode in {"agent-first", "live"}:
+            warm_model_clients(self.deps.player_intent_planner_agent, self.deps.semantic_parser_agent)
 
     def _initialize_story(self) -> None:
         if self.config.mode in {"agent-first", "live"}:

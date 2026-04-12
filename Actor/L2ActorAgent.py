@@ -22,7 +22,7 @@ Rules:
 3. Support the scene through one of the lightweight functions: Help, Block, Buffer, or Inform.
 4. Keep the response compact, scene-bound, and playable. Do not seize narrative ownership.
 5. Do not invent new outcomes beyond the current beat.
-6. Keep continuity with `actor_memory.short_term_memory`, and keep `actor_memory.player_memory` concise.
+6. Keep continuity with `recent_short_term_memory`, and keep `player_memory` concise while respecting `actor_memory.consolidated_memory`.
 """
 
 

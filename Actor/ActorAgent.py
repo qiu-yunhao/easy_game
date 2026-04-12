@@ -32,9 +32,9 @@ Rules:
     - stay within `judgement_preference` and `behavior_rule`
     - let `speech_style` shape wording
     - support the scene without trying to dominate it
-11. Use `actor_memory.short_term_memory` to stay coherent with the current chapter and scene.
-12. Use `actor_memory.player_memory` when the player is involved in the interaction.
-13. If `actor_profile.agent_type` is `L1`, let `l1_profile` and `actor_memory.long_term_memory` carry the deeper dramatic continuity.
+11. Use `recent_short_term_memory` to stay coherent with the current chapter and scene.
+12. Use `player_memory` when the player is involved in the interaction.
+13. If `actor_profile.agent_type` is `L1`, let `l1_profile`, `actor_memory.pinned_long_term_memory`, `actor_memory.consolidated_memory`, and `actor_memory.long_term_memory` carry the deeper dramatic continuity.
 """
 
 class ActorAgent(BaseAgent):

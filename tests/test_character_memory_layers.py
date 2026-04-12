@@ -140,9 +140,13 @@ class CharacterMemoryLayerTests(unittest.TestCase):
         self.assertEqual(l1_profile["memory_profile"]["long_term_limit"], 7)
         self.assertEqual(l1_profile["memory_profile"]["short_term_limit"], 30)
         self.assertEqual(l1_profile["memory_profile"]["player_memory_limit"], 8)
+        self.assertEqual(l1_profile["memory_profile"]["pinned_long_term_limit"], 7)
+        self.assertEqual(l1_profile["memory_profile"]["consolidated_memory_limit"], 6)
         self.assertEqual(l2_profile["memory_profile"]["long_term_limit"], 3)
         self.assertEqual(l2_profile["memory_profile"]["short_term_limit"], 30)
         self.assertEqual(l2_profile["memory_profile"]["player_memory_limit"], 3)
+        self.assertEqual(l2_profile["memory_profile"]["pinned_long_term_limit"], 3)
+        self.assertEqual(l2_profile["memory_profile"]["consolidated_memory_limit"], 3)
 
     def test_player_action_updates_guard_memories(self) -> None:
         state, profiles = _build_state(guard_agent_type="L2")
@@ -168,10 +172,14 @@ class CharacterMemoryLayerTests(unittest.TestCase):
             guard_memory["short_term_memory"][0]["summary"],
             "Player offers the guard a clear explanation.",
         )
-        self.assertGreaterEqual(len(guard_memory["long_term_memory"]), 1)
+        self.assertGreaterEqual(len(guard_memory["pinned_long_term_memory"]), 1)
         self.assertEqual(
-            guard_memory["long_term_memory"][-1]["event_summary"],
+            guard_memory["pinned_long_term_memory"][-1]["event_summary"],
             "Player offers the guard a clear explanation.",
+        )
+        self.assertEqual(
+            guard_memory["pinned_long_term_memory"][-1]["pin_reason"],
+            "revealed_facts",
         )
         self.assertEqual(len(guard_memory["player_memory"]["key_events"]), 1)
         self.assertAlmostEqual(
@@ -209,11 +217,52 @@ class CharacterMemoryLayerTests(unittest.TestCase):
         l2_memory = l2_state["characters"]["guard"]["memory"]
         l1_memory = l1_state["characters"]["guard"]["memory"]
         self.assertEqual(len(l2_memory["short_term_memory"]), 5)
-        self.assertEqual(len(l2_memory["long_term_memory"]), 3)
+        self.assertEqual(len(l2_memory["pinned_long_term_memory"]), 3)
+        self.assertTrue(
+            all(
+                not item["event_summary"].startswith("Player pressures the guard")
+                for item in l2_memory["long_term_memory"]
+            )
+        )
         self.assertEqual(len(l2_memory["player_memory"]["key_events"]), 3)
         self.assertEqual(len(l1_memory["short_term_memory"]), 5)
-        self.assertEqual(len(l1_memory["long_term_memory"]), 7)
+        self.assertEqual(len(l1_memory["pinned_long_term_memory"]), 5)
+        self.assertTrue(
+            all(
+                not item["event_summary"].startswith("Player pressures the guard")
+                for item in l1_memory["long_term_memory"]
+            )
+        )
         self.assertEqual(len(l1_memory["player_memory"]["key_events"]), 5)
+
+    def test_non_pinned_long_term_events_consolidate_when_raw_window_overflows(self) -> None:
+        state, profiles = _build_state(guard_agent_type="L2")
+
+        for index in range(5):
+            state["runtime"]["resolved_act"] = build_resolved_act_payload(
+                actor="guard",
+                mode="event",
+                target=None,
+                content=f"Guard records procedural shift {index}.",
+                next_intent="keep watch",
+            )
+            state = apply_resolved_act(
+                state,
+                RelationshipTuning(),
+                character_profiles=profiles,
+            )
+
+        guard_memory = state["characters"]["guard"]["memory"]
+        self.assertEqual(len(guard_memory["pinned_long_term_memory"]), 0)
+        self.assertLessEqual(len(guard_memory["long_term_memory"]), 3)
+        self.assertGreaterEqual(len(guard_memory["consolidated_memory"]), 1)
+        self.assertTrue(
+            all(block["topic"] == "scene_pivot" for block in guard_memory["consolidated_memory"])
+        )
+        self.assertGreaterEqual(
+            sum(block["source_event_count"] for block in guard_memory["consolidated_memory"]),
+            2,
+        )
 
 
 if __name__ == "__main__":

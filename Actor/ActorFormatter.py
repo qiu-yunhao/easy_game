@@ -11,6 +11,16 @@ from ScenePlan import ScenePlan
 from StoryStateUtils import clean_text
 
 
+def _build_actor_runtime_prompt_state(actor_runtime: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        "emotion": actor_runtime.get("emotion", {}),
+        "intent": actor_runtime.get("intent", ""),
+        "known_facts": actor_runtime.get("known_facts", []),
+        "relationship_delta": actor_runtime.get("relationship_delta", {}),
+        "last_turn": actor_runtime.get("last_turn", -1),
+    }
+
+
 def _build_actor_payload(
     state: GameState,
     character_profiles: dict[str, CharacterProfile],
@@ -27,6 +37,7 @@ def _build_actor_payload(
         actor_runtime.get("memory", {}),
         actor_profile=actor_profile,
     )
+    actor_runtime_prompt = _build_actor_runtime_prompt_state(actor_runtime)
     return {
         "plot": {
             "chapter_id": state["plot"]["chapter_id"],
@@ -38,10 +49,6 @@ def _build_actor_payload(
             "current_chapter_title": state["plot"].get("current_chapter_title", ""),
             "current_chapter_overview": state["plot"].get("current_chapter_overview", ""),
         },
-        "scene_plan": state["scene_plan"],
-        "scene": state["scene"],
-        "director_brief": state["director_brief"],
-        "next_act": planned_act,
         "actor_profile": actor_profile,
         "agent_contract": {
             "agent_type": actor_profile.get("agent_type", "actor"),
@@ -50,13 +57,19 @@ def _build_actor_payload(
             "layer_assignment": actor_profile.get("layer_assignment", {}),
             "memory_profile": actor_memory_profile,
         },
-        "actor_runtime": actor_runtime,
         "actor_memory": {
-            "long_term_memory": actor_memory.get("long_term_memory", []),
-            "short_term_memory": actor_memory.get("short_term_memory", [])[-10:],
-            "player_memory": actor_memory.get("player_memory", {}),
+            "pinned_long_term_memory": actor_memory.get("pinned_long_term_memory", []),
+            "consolidated_memory": actor_memory.get("consolidated_memory", [])[-3:],
+            "long_term_memory": actor_memory.get("long_term_memory", [])[-3:],
         },
+        "scene_plan": state["scene_plan"],
+        "scene": state["scene"],
+        "director_brief": state["director_brief"],
+        "player_memory": actor_memory.get("player_memory", {}),
+        "actor_runtime": actor_runtime_prompt,
+        "next_act": planned_act,
         "recent_history": state["history"][-8:],
+        "recent_short_term_memory": actor_memory.get("short_term_memory", [])[-10:],
     }
 
 

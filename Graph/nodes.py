@@ -67,6 +67,7 @@ from actor_create_agent import ActorCreateAgent
 
 if TYPE_CHECKING:
     from History.HistorySummarizerAgent import HistorySummarizerAgent
+    from PlayerControl.PlayerIntentPlannerAgent import PlayerIntentPlannerAgent
     from PlayerControl.PlayerCommandTools import PlayerCommandToolRuntime
 
 
@@ -81,6 +82,7 @@ class GraphDependencies:
     l2_actor_agent: ActorAgent | None = None
     l1_actor_agent: ActorAgent | None = None
     narrator_agent: NarratorAgent | None = None
+    player_intent_planner_agent: "PlayerIntentPlannerAgent | None" = None
     semantic_parser_agent: SemanticParserAgent | None = None
     player_command_tools: "PlayerCommandToolRuntime | None" = None
     stylistic_polish_agent: StylisticPolishAgent | None = None

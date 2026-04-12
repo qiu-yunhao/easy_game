@@ -17,6 +17,7 @@ sys.modules.setdefault("openai", openai_stub)
 
 from GameState import create_character_runtime_state
 from Persistence.Store import GameSaveStore
+from PlayerControl.PlayerIntentPlannerAgent import build_heuristic_player_intent_plan
 from web_session import SessionConfig, WebGameSession
 
 
@@ -125,6 +126,46 @@ class PlayerCommandToolTests(unittest.TestCase):
         self.assertIn("铁剑", state["history"][-1]["content"])
         self.assertEqual(state["player"]["last_parsed_act"]["tool_name"], "query_inventory")
         self.assertEqual(session.state["runtime"]["next_act"]["actor"], "player")
+
+    def test_heuristic_intent_planner_splits_narrative_and_tool_steps(self) -> None:
+        session = _build_tool_ready_session()
+
+        plan = build_heuristic_player_intent_plan(
+            "open the cell door, then check relation mentor_liu",
+            character_profiles=session.character_profiles,
+        )
+
+        self.assertEqual([step["kind"] for step in plan["planned_steps"]], ["narrative_action", "tool_call"])
+        self.assertEqual(plan["planned_steps"][0]["content"], "open the cell door")
+        self.assertEqual(plan["planned_steps"][1]["tool_call"]["name"], "query_relation")
+        self.assertEqual(plan["planned_steps"][1]["tool_call"]["arguments"], {"target_name": "mentor_liu"})
+
+    def test_web_session_executes_mixed_narrative_and_tool_plan_in_order(self) -> None:
+        store = GameSaveStore("sqlite+pysqlite:///:memory:")
+        store.create_schema()
+        session = _build_tool_ready_session()
+        user = store.ensure_user(username="tester", display_name="Tester")
+        created = store.create_new_game(
+            user_id=user["id"],
+            slot_name="slot",
+            session_snapshot=session.export_runtime_snapshot(),
+        )
+        session.bind_save_context(
+            save_store=store,
+            user_id=user["id"],
+            player_id=created["player"]["id"],
+        )
+
+        state = session.apply_player_action("open the cell door, then check relation mentor_liu")
+
+        self.assertEqual(state["history"][-2]["kind"], "player")
+        self.assertIn("open the cell door", state["history"][-2]["content"])
+        self.assertEqual(state["history"][-1]["kind"], "system")
+        self.assertEqual(state["history"][-1]["tool_name"], "query_relation")
+        self.assertEqual(
+            [step["kind"] for step in state["player"]["last_parsed_act"]["planned_steps"]],
+            ["narrative_action", "tool_call"],
+        )
 
 
 if __name__ == "__main__":

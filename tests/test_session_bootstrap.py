@@ -157,6 +157,10 @@ class SessionBootstrapTests(unittest.TestCase):
                 del kwargs
                 return self._build_named_agent("semantic_parser_agent")
 
+            def build_player_intent_planner_agent(self, **kwargs):
+                del kwargs
+                return self._build_named_agent("player_intent_planner_agent")
+
             def build_stylistic_polish_agent(self, **kwargs):
                 del kwargs
                 return self._build_named_agent("stylistic_polish_agent")
@@ -166,6 +170,7 @@ class SessionBootstrapTests(unittest.TestCase):
 
         self.assertIsNotNone(deps.playwright_agent)
         self.assertIsNotNone(deps.director_agent)
+        self.assertIsNotNone(deps.player_intent_planner_agent)
         self.assertIsNotNone(deps.semantic_parser_agent)
         self.assertIsNotNone(deps.history_summarizer_agent)
         self.assertIs(deps.history_manager.summarizer_agent, deps.history_summarizer_agent)
@@ -184,6 +189,7 @@ class SessionBootstrapTests(unittest.TestCase):
                 "l1_actor_agent",
                 "narrator_agent",
                 "history_summarizer_agent",
+                "player_intent_planner_agent",
                 "semantic_parser_agent",
                 "stylistic_polish_agent",
             ],

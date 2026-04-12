@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     from Director.DirectorFormatter import DirectorFormatter
     from History.HistorySummarizerAgent import HistorySummarizerAgent
     from Narrator.NarratorAgent import NarratorAgent
+    from PlayerControl.PlayerIntentPlannerAgent import PlayerIntentPlannerAgent
     from PlayerControl.SemanticParserAgent import SemanticParserAgent
     from PlayerWriter.PlayerWriterAgent import PlaywrightAgent
     from PlayerWriter.PlayerWriterFormatter import PlaywrightFormatter
@@ -70,6 +71,9 @@ class ComponentFactory:
 
     def build_semantic_parser_agent(self, **kwargs: object) -> "SemanticParserAgent":
         return self._build_component("PlayerControl.SemanticParserAgent", "SemanticParserAgent", **kwargs)
+
+    def build_player_intent_planner_agent(self, **kwargs: object) -> "PlayerIntentPlannerAgent":
+        return self._build_component("PlayerControl.PlayerIntentPlannerAgent", "PlayerIntentPlannerAgent", **kwargs)
 
     def build_narrator_agent(self, **kwargs: object) -> "NarratorAgent":
         return self._build_component("Narrator.NarratorAgent", "NarratorAgent", **kwargs)
