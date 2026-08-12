@@ -18,6 +18,13 @@ DIRECTOR_RESPONSE_SCHEMA = {
                     "type": "array",
                     "items": {"type": "string"},
                 },
+                "response_groups": {
+                    "type": "array",
+                    "items": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                    },
+                },
                 "lead_in_text": {"type": "string"},
                 "wrap_up_text": {"type": "string"},
                 "stage_actions": {
@@ -55,6 +62,7 @@ DIRECTOR_RESPONSE_SCHEMA = {
                 "tension_target",
                 "allow_interrupt",
                 "who_should_respond",
+                "response_groups",
                 "lead_in_text",
                 "wrap_up_text",
                 "stage_actions",
