@@ -503,6 +503,16 @@ def apply_director_brief(
     pending_beat_actors = [
         cid for cid in normalized["who_should_respond"] if cid in prioritized_active_on_stage
     ]
+    pending_response_groups = [
+        filtered
+        for filtered in (
+            [cid for cid in group if cid in prioritized_active_on_stage]
+            for group in normalized["response_groups"]
+        )
+        if filtered
+    ]
+    if not pending_response_groups and pending_beat_actors:
+        pending_response_groups = [[cid] for cid in pending_beat_actors]
     fallback_turns = 0 if pending_beat_actors else int(bool(prioritized_active_on_stage))
 
     return {
@@ -513,6 +523,7 @@ def apply_director_brief(
             **state["runtime"],
             "eligible_actors": prioritized_active_on_stage,
             "pending_beat_actors": pending_beat_actors,
+            "pending_response_groups": pending_response_groups,
             "beat_fallback_turns_remaining": fallback_turns,
             "next_act": None,
             "resolved_act": None,

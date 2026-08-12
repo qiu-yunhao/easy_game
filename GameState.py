@@ -126,6 +126,7 @@ class RuntimeState(TypedDict):
     eligible_actors: list[str]
     pending_intro_kind: Literal["", "opening", "chapter", "scene"]
     pending_beat_actors: list[str]
+    pending_response_groups: list[list[str]]
     beat_fallback_turns_remaining: int
     narration_queue: list[NarrationQueueItem]
     scene_candidates: list[SceneCandidate]
@@ -163,6 +164,7 @@ def create_runtime_state(on_stage: list[str] | None = None) -> RuntimeState:
         "eligible_actors": list(on_stage or []),
         "pending_intro_kind": "opening",
         "pending_beat_actors": [],
+        "pending_response_groups": [],
         "beat_fallback_turns_remaining": 0,
         "narration_queue": [],
         "scene_candidates": [],
