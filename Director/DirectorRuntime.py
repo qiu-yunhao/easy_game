@@ -309,6 +309,35 @@ def _prioritize_active_actors(
     return prioritized
 
 
+def _normalize_response_groups(
+    raw_groups: Any,
+    who_should_respond: list[str],
+) -> list[list[str]]:
+    allowed = set(who_should_respond)
+    serial = [[cid] for cid in who_should_respond]
+    if not isinstance(raw_groups, list):
+        return serial
+
+    groups: list[list[str]] = []
+    seen: set[str] = set()
+    for raw_group in raw_groups:
+        if not isinstance(raw_group, list):
+            return serial
+        group: list[str] = []
+        for item in raw_group:
+            cid = str(item).strip()
+            if not cid or cid not in allowed or cid in seen:
+                continue
+            seen.add(cid)
+            group.append(cid)
+        if group:
+            groups.append(group)
+
+    if seen != allowed:
+        return serial
+    return groups
+
+
 def normalize_director_brief(
     brief: Mapping[str, Any] | None,
     current_on_stage: list[str],
@@ -361,6 +390,10 @@ def normalize_director_brief(
     normalized["wrap_up_text"] = str(brief.get("wrap_up_text", "") or "").strip()
     normalized["stage_actions"] = stage_actions
     normalized["notes"] = [str(note) for note in brief.get("notes", []) if str(note).strip()]
+    normalized["response_groups"] = _normalize_response_groups(
+        brief.get("response_groups"),
+        normalized["who_should_respond"],
+    )
     return normalized
 
 
