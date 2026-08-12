@@ -70,5 +70,26 @@ class NormalizeResponseGroupsTest(unittest.TestCase):
         self.assertEqual(result["response_groups"], [["a"], ["b"]])
 
 
+class InterruptSplitsGroupsTest(unittest.TestCase):
+    def test_allow_interrupt_splits_focus_into_own_group(self):
+        brief = {
+            "beat": "b", "beat_goal": "g",
+            "focus_character": "a",
+            "tension_target": 0.3,
+            "allow_interrupt": True,
+            "who_should_respond": ["a", "b", "c"],
+            "response_groups": [["a", "b"], ["c"]],
+            "lead_in_text": "", "wrap_up_text": "",
+            "stage_actions": {"enter": [], "leave": [], "suppress": [], "unsuppress": []},
+            "notes": [],
+        }
+        result = normalize_director_brief(
+            brief, current_on_stage=["a", "b", "c"], allowed_actor_ids=["a", "b", "c"],
+        )
+        self.assertEqual(result["response_groups"][0], ["a"])
+        flat = [cid for grp in result["response_groups"] for cid in grp]
+        self.assertEqual(sorted(flat), ["a", "b", "c"])
+
+
 if __name__ == "__main__":
     unittest.main()

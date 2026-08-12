@@ -338,6 +338,30 @@ def _normalize_response_groups(
     return groups
 
 
+def _split_interrupt_actor(
+    groups: list[list[str]],
+    *,
+    focus_character: str | None,
+    allow_interrupt: bool,
+) -> list[list[str]]:
+    if not allow_interrupt or not focus_character:
+        return groups
+    focus = str(focus_character).strip()
+    if not focus:
+        return groups
+    remaining: list[list[str]] = []
+    found = False
+    for group in groups:
+        stripped = [cid for cid in group if cid != focus]
+        if focus in group:
+            found = True
+        if stripped:
+            remaining.append(stripped)
+    if not found:
+        return groups
+    return [[focus], *remaining]
+
+
 def normalize_director_brief(
     brief: Mapping[str, Any] | None,
     current_on_stage: list[str],
@@ -390,9 +414,13 @@ def normalize_director_brief(
     normalized["wrap_up_text"] = str(brief.get("wrap_up_text", "") or "").strip()
     normalized["stage_actions"] = stage_actions
     normalized["notes"] = [str(note) for note in brief.get("notes", []) if str(note).strip()]
-    normalized["response_groups"] = _normalize_response_groups(
-        brief.get("response_groups"),
-        normalized["who_should_respond"],
+    normalized["response_groups"] = _split_interrupt_actor(
+        _normalize_response_groups(
+            brief.get("response_groups"),
+            normalized["who_should_respond"],
+        ),
+        focus_character=normalized["focus_character"],
+        allow_interrupt=normalized["allow_interrupt"],
     )
     return normalized
 
