@@ -24,6 +24,7 @@ from History.GameMemory import empty_memory_state
 from PlayerControl import BufferedPlayerInterface
 from ResolvedActUtils import build_resolved_act_payload
 from ScenePlan import empty_scene_plan
+from session_bootstrap import register_default_hooks
 
 
 class FakeDirector:
@@ -228,6 +229,7 @@ class BeatResolutionTests(unittest.TestCase):
             l1_actor_agent=FakeTierActor("l1"),
             component_factory=ComponentFactory(),
         )
+        register_default_hooks(deps)
 
         next_state = actor_node(state, deps)
 
@@ -266,6 +268,7 @@ class BeatResolutionTests(unittest.TestCase):
             l1_actor_agent=FakeTierActor("l1"),
             component_factory=ComponentFactory(),
         )
+        register_default_hooks(deps)
 
         next_state = actor_node(state, deps)
 
@@ -296,6 +299,7 @@ class BeatResolutionTests(unittest.TestCase):
             l1_actor_agent=FakeTierActor("l1"),
             component_factory=ComponentFactory(),
         )
+        register_default_hooks(deps)
 
         next_state = actor_node(state, deps)
 
@@ -342,6 +346,7 @@ class BeatResolutionTests(unittest.TestCase):
             component_factory=ComponentFactory(),
             agent_first=True,
         )
+        register_default_hooks(deps)
 
         state = director_node(state, deps)
         state = scheduler_node(state, deps)
@@ -400,6 +405,7 @@ class BeatResolutionTests(unittest.TestCase):
             component_factory=ComponentFactory(),
             agent_first=True,
         )
+        register_default_hooks(deps)
 
         state = director_node(state, deps)
         state = scheduler_node(state, deps)
@@ -456,6 +462,7 @@ class BeatResolutionTests(unittest.TestCase):
             component_factory=ComponentFactory(),
             agent_first=True,
         )
+        register_default_hooks(deps)
 
         state = director_node(state, deps)
         state = scheduler_node(state, deps)
@@ -521,6 +528,7 @@ class BeatResolutionTests(unittest.TestCase):
             component_factory=ComponentFactory(),
             agent_first=True,
         )
+        register_default_hooks(deps)
 
         state = director_node(state, deps)
         state = scheduler_node(state, deps)
@@ -578,6 +586,7 @@ class BeatResolutionTests(unittest.TestCase):
             component_factory=ComponentFactory(),
             agent_first=True,
         )
+        register_default_hooks(deps)
 
         state = director_node(state, deps)
         state = scheduler_node(state, deps)
@@ -624,6 +633,7 @@ class BeatResolutionTests(unittest.TestCase):
             character_profiles=profiles,
             component_factory=ComponentFactory(),
         )
+        register_default_hooks(deps)
 
         next_state = cultivation_progress_node(state, deps)
 
@@ -631,6 +641,81 @@ class BeatResolutionTests(unittest.TestCase):
         self.assertEqual(next_state["history"][-1]["narration_source"], "cultivation_progress")
         self.assertIn("沈云烟", next_state["history"][-1]["content"])
         self.assertEqual(deps.character_profiles["player"]["realm"], "练气一层")
+
+
+class ParallelGroupBeatTest(unittest.TestCase):
+    def test_group_of_two_read_same_start_history(self) -> None:
+        seen_history_lens: dict[str, int] = {}
+
+        class RecordingActor:
+            def perform_turn(self, state, character_profiles):
+                del character_profiles
+                planned = state["runtime"].get("next_act") or {}
+                actor = planned.get("actor")
+                seen_history_lens[actor] = len(state["history"])
+                return build_resolved_act_payload(
+                    actor=actor,
+                    mode=planned.get("mode", "speak"),
+                    target=planned.get("target"),
+                    content=f"{actor}:line",
+                    spoken_text=f"{actor}:line",
+                )
+
+        state = _build_state(
+            on_stage=["npc_a", "npc_b"],
+            focus_character=None,
+        )
+        profiles = _build_profiles(["player", "npc_a", "npc_b"])
+        deps = GraphDependencies(
+            scene_config={
+                "scene_id": "scene-1",
+                "default_location_id": "room",
+                "default_on_stage": ["npc_a", "npc_b"],
+            },
+            character_profiles=profiles,
+            director_agent=FakeDirector(
+                {
+                    "beat": "parallel",
+                    "beat_goal": "npc_a and npc_b speak independently",
+                    "focus_character": None,
+                    "tension_target": 0.3,
+                    "allow_interrupt": False,
+                    "who_should_respond": ["npc_a", "npc_b"],
+                    "response_groups": [["npc_a", "npc_b"]],
+                    "stage_actions": {
+                        "enter": [],
+                        "leave": [],
+                        "suppress": [],
+                        "unsuppress": [],
+                    },
+                    "notes": [],
+                }
+            ),
+            actor_agent=RecordingActor(),
+            narrator_agent=FakeNarratorAgent(),
+            stylistic_polish_agent=FakeStylisticPolishAgent(),
+            component_factory=ComponentFactory(),
+            agent_first=True,
+        )
+        register_default_hooks(deps)
+
+        state = director_node(state, deps)
+        self.assertEqual(
+            state["runtime"]["pending_response_groups"],
+            [["npc_a", "npc_b"]],
+        )
+
+        state = scheduler_node(state, deps)
+        state = resolve_story_turn(state, deps)
+
+        actors = [item["actor"] for item in state["history"] if item["actor"] in ("npc_a", "npc_b")]
+        self.assertEqual(actors, ["npc_a", "npc_b"])
+        # Parallel invariant: both actors generated against the SAME group-start
+        # history. In the old serial loop npc_b would have seen npc_a's line
+        # (history_len larger by one).
+        self.assertEqual(seen_history_lens["npc_a"], seen_history_lens["npc_b"])
+        self.assertIsNone(state["runtime"]["next_act"])
+        self.assertEqual(state["runtime"]["pending_beat_actors"], [])
 
 
 if __name__ == "__main__":

@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
 
 from GameState import GameState
 from Graph.graph_compile import NodeStep, compile_graph_with_nodes
+from Graph.hookable_node import HookableNode
 
 if TYPE_CHECKING:
     from Graph.nodes import GraphDependencies
@@ -11,25 +12,19 @@ if TYPE_CHECKING:
 
 def build_beat_execution_subgraph(
     *,
-    lead_in_step: NodeStep,
-    actor_step: NodeStep,
-    history_commit_step: NodeStep,
-    contextual_progression_step: NodeStep,
-    narration_step: NodeStep,
-    cultivation_step: NodeStep,
-    scene_end_step: NodeStep,
-    refresh_history_step: NodeStep,
+    director_lead_in: HookableNode,
+    actor: HookableNode,
+    narration: HookableNode,
+    cultivation_progress: HookableNode,
+    scene_end: HookableNode,
 ) -> NodeStep:
     return compile_graph_with_nodes(
         [
-            ("director_lead_in", lead_in_step),
-            ("actor", actor_step),
-            ("history_commit", history_commit_step),
-            ("contextual_progression", contextual_progression_step),
-            ("narration", narration_step),
-            ("cultivation_progress", cultivation_step),
-            ("scene_end", scene_end_step),
-            ("refresh_history", refresh_history_step),
+            (director_lead_in.name, director_lead_in.as_step()),
+            (actor.name, actor.as_step()),
+            (narration.name, narration.as_step()),
+            (cultivation_progress.name, cultivation_progress.as_step()),
+            (scene_end.name, scene_end.as_step()),
         ],
         fallback_to_runner=True,
     )
@@ -63,6 +58,43 @@ def beat_has_remaining_turns(state: GameState) -> bool:
     return int(state["runtime"].get("beat_fallback_turns_remaining", 0) or 0) > 0
 
 
+def _next_group(state: GameState) -> list[str]:
+    """Return the next parallel group of still-active actors, or []."""
+    active = set(state["runtime"].get("pending_beat_actors", []) or [])
+    for group in state["runtime"].get("pending_response_groups", []) or []:
+        eligible = [cid for cid in group if cid in active]
+        if len(eligible) > 1:
+            return eligible
+    return []
+
+
+def _consume_group(state: GameState, group: list[str]) -> GameState:
+    """Prune a resolved group from the pending queues and clear next_act."""
+    consumed = set(group)
+    pending_actors = [
+        cid
+        for cid in (state["runtime"].get("pending_beat_actors", []) or [])
+        if cid not in consumed
+    ]
+    pending_groups = [
+        remaining
+        for remaining in (
+            [cid for cid in grp if cid not in consumed]
+            for grp in (state["runtime"].get("pending_response_groups", []) or [])
+        )
+        if remaining
+    ]
+    return {
+        **state,
+        "runtime": {
+            **state["runtime"],
+            "pending_beat_actors": pending_actors,
+            "pending_response_groups": pending_groups,
+            "next_act": None,
+        },
+    }
+
+
 def run_beat_loop(
     state: GameState,
     deps: "GraphDependencies",
@@ -71,6 +103,7 @@ def run_beat_loop(
     execution_subgraph: NodeStep,
     flush_step: NodeStep,
     wrap_step: NodeStep,
+    group_step: Callable[[GameState, list[str]], GameState] | None = None,
 ) -> GameState:
     current = state
     safety_limit = max(
@@ -97,7 +130,12 @@ def run_beat_loop(
         if is_player_turn(current) and not can_auto_resolve_player_turn(deps):
             break
 
-        current = execution_subgraph(current)
+        group = _next_group(current) if group_step is not None else []
+        if group and str((current["runtime"].get("next_act") or {}).get("actor", "")) in group:
+            current = group_step(current, group)
+            current = _consume_group(current, group)
+        else:
+            current = execution_subgraph(current)
         resolved_turns += 1
 
         if not beat_has_remaining_turns(current):

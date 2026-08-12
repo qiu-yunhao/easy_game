@@ -25,6 +25,7 @@ from Graph.narration_nodes import (
     director_wrap_up_node,
     narration_subgraph_node,
 )
+from Graph.hooks import HookRegistry
 from Graph.contextual_scene_handoffs import apply_contextual_scene_progression
 from Graph.story_cast_nodes import _ensure_story_cast, _seed_scene_cast_for_current_chapter
 from Graph.story_planning import (
@@ -63,7 +64,7 @@ from SceneEnd.SceneEndHeuristics import SceneEndPolicy
 from Scheduler import apply_scheduler_decision
 from Scheduler.SchedulerPolicy import SchedulerPolicy
 from StylisticPolish import StylisticPolishAgent, deterministic_nonverbal_cleanup
-from actor_create_agent import ActorCreateAgent
+from Actor.ActorCreateAgent import ActorCreateAgent
 
 if TYPE_CHECKING:
     from History.HistorySummarizerAgent import HistorySummarizerAgent
@@ -96,6 +97,7 @@ class GraphDependencies:
     agent_first: bool = False
     actor_create_signature: str = ""
     beat_execution_subgraph: Callable[[GameState], GameState] | None = None
+    hook_registry: HookRegistry = field(default_factory=HookRegistry)
 
 
 CULTIVATION_SIGNAL_MARKERS = (
@@ -390,17 +392,44 @@ def scheduler_node(state: GameState, deps: GraphDependencies) -> GameState:
 def beat_resolution_node(state: GameState, deps: GraphDependencies) -> GameState:
     execution_subgraph = deps.beat_execution_subgraph
     if execution_subgraph is None:
+        # Lazy import breaks Graph.nodes <-> Graph.beat_nodes circular dependency.
+        from Graph.beat_nodes import (
+            ActorNode,
+            CultivationProgressNode,
+            DirectorLeadInNode,
+            NarrationNode,
+            SceneEndNode,
+        )
+
+        registry = deps.hook_registry
         execution_subgraph = build_beat_execution_subgraph(
-            lead_in_step=lambda current: director_lead_in_node(current, deps),
-            actor_step=lambda current: actor_node(current, deps),
-            history_commit_step=lambda current: history_commit_node(current, deps),
-            contextual_progression_step=lambda current: contextual_progression_node(current, deps),
-            narration_step=lambda current: narration_subgraph_node(current, deps),
-            cultivation_step=lambda current: cultivation_progress_node(current, deps),
-            scene_end_step=lambda current: scene_end_node(current, deps),
-            refresh_history_step=lambda current: refresh_history_node(current, deps),
+            director_lead_in=DirectorLeadInNode(deps, registry),
+            actor=ActorNode(deps, registry),
+            narration=NarrationNode(deps, registry),
+            cultivation_progress=CultivationProgressNode(deps, registry),
+            scene_end=SceneEndNode(deps, registry),
         )
         deps.beat_execution_subgraph = execution_subgraph
+
+    def _group_step(current: GameState, group: list[str]) -> GameState:
+        from Graph.beat_group import apply_group_results, run_actor_group
+
+        successes, failures = run_actor_group(
+            current,
+            group=group,
+            resolve_agent=lambda actor_id: _resolve_agent_for_actor(deps, actor_id),
+            character_profiles=deps.character_profiles,
+        )
+        applied = apply_group_results(
+            current,
+            successes=successes,
+            failures=failures,
+            relationship_tuning=deps.gameplay_tuning.relationship,
+            character_profiles=deps.character_profiles,
+        )
+        applied = narration_subgraph_node(applied, deps)
+        applied = cultivation_progress_node(applied, deps)
+        return scene_end_node(applied, deps)
 
     return run_beat_loop(
         state,
@@ -409,6 +438,35 @@ def beat_resolution_node(state: GameState, deps: GraphDependencies) -> GameState
         execution_subgraph=execution_subgraph,
         flush_step=lambda current: narration_subgraph_node(current, deps, force_flush=True),
         wrap_step=lambda current: director_wrap_up_node(current, deps),
+        group_step=_group_step,
+    )
+
+
+def _resolve_agent_for_actor(
+    deps: GraphDependencies,
+    actor_id: str,
+) -> ActorAgent | None:
+    actor_profile = deps.character_profiles.get(actor_id, {})
+    agent_type = _clean_text(actor_profile.get("agent_type", ""), "actor")
+    if agent_type == "L2":
+        return _resolve_component(
+            deps,
+            "l2_actor_agent",
+            "build_l2_actor_agent",
+            required_name="an L2ActorAgent",
+        )
+    if agent_type == "L1":
+        return _resolve_component(
+            deps,
+            "l1_actor_agent",
+            "build_l1_actor_agent",
+            required_name="an L1ActorAgent",
+        )
+    return _resolve_component(
+        deps,
+        "actor_agent",
+        "build_actor_agent",
+        required_name="an ActorAgent",
     )
 
 
@@ -421,30 +479,7 @@ def actor_node(state: GameState, deps: GraphDependencies) -> GameState:
 
     planned_act = state["runtime"].get("next_act") or {}
     actor_id = str(planned_act.get("actor", "") or "").strip()
-    actor_profile = deps.character_profiles.get(actor_id, {})
-    agent_type = _clean_text(actor_profile.get("agent_type", ""), "actor")
-    selected_actor_agent: ActorAgent | None
-    if agent_type == "L2":
-        selected_actor_agent = _resolve_component(
-            deps,
-            "l2_actor_agent",
-            "build_l2_actor_agent",
-            required_name="an L2ActorAgent",
-        )
-    elif agent_type == "L1":
-        selected_actor_agent = _resolve_component(
-            deps,
-            "l1_actor_agent",
-            "build_l1_actor_agent",
-            required_name="an L1ActorAgent",
-        )
-    else:
-        selected_actor_agent = _resolve_component(
-            deps,
-            "actor_agent",
-            "build_actor_agent",
-            required_name="an ActorAgent",
-        )
+    selected_actor_agent = _resolve_agent_for_actor(deps, actor_id)
 
     return resolve_npc_turn_state(
         state,
