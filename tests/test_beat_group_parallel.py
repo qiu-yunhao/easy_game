@@ -15,7 +15,66 @@ class _OpenAI:  # pragma: no cover - import shim
 openai_stub.OpenAI = _OpenAI
 sys.modules.setdefault("openai", openai_stub)
 
-from Graph.beat_group import merge_group_flags, run_actor_group
+from Graph.beat_group import apply_group_results, merge_group_flags, run_actor_group
+from GameState import (
+    create_character_runtime_state,
+    create_initial_game_state,
+    create_player_state,
+)
+from History.GameMemory import empty_memory_state
+from ResolvedActUtils import build_resolved_act_payload
+from ScenePlan import empty_scene_plan
+
+
+def _apply_state(on_stage):
+    cast = {"player", *on_stage}
+    return create_initial_game_state(
+        plot={
+            "chapter_id": "chapter-1",
+            "scene_id": "scene-1",
+            "current_scene_index": 0,
+            "chapter_goal": "",
+            "current_chapter_hooks": [],
+            "plot_flags": {},
+            "story_premise": "",
+            "exploration_drive": "",
+            "story_outline": [],
+            "current_chapter_title": "",
+            "current_chapter_overview": "",
+            "active_outline_chapter_id": "",
+            "story_premise_source": "",
+            "story_outline_source": "",
+            "chapter_expansion_source": "",
+            "story_foundation_source": "",
+            "chapter_focus_source": "",
+            "scene_candidates_source": "",
+            "current_chapter_index": 0,
+            "cultivation_goal": "",
+            "current_player_realm": "",
+            "current_chapter_realm": "",
+            "next_chapter_realm": "",
+            "chapter_transition_requirement": "",
+            "completed_chapters": [],
+        },
+        scene={
+            "location_id": "room",
+            "time_tag": "now",
+            "beat": "",
+            "tension": 0.2,
+            "focus_character": None,
+            "on_stage": list(on_stage),
+            "allow_interrupt": False,
+            "suppressed": [],
+        },
+        characters={
+            actor_id: create_character_runtime_state(intent=f"{actor_id}-intent")
+            for actor_id in cast
+        },
+        scene_plan=empty_scene_plan(),
+        memory=empty_memory_state(),
+        player=create_player_state(enabled=False, controlled_character=None),
+    )
+
 
 
 class FakeActorAgent:
@@ -125,6 +184,37 @@ class RunActorGroupTest(unittest.TestCase):
         self.assertEqual([aid for aid, _ in successes], ["b"])
         self.assertEqual([aid for aid, _ in failures], ["a"])
         self.assertEqual(agents["a"].calls, 4)
+
+
+class ApplyGroupResultsTest(unittest.TestCase):
+    def _state(self):
+        return _apply_state(["a", "b"])
+
+    def test_both_acts_committed_to_history_in_order(self):
+        state = self._state()
+        acts = [
+            ("a", build_resolved_act_payload(actor="a", mode="speak", target=None, content="A-line", spoken_text="A-line")),
+            ("b", build_resolved_act_payload(actor="b", mode="speak", target=None, content="B-line", spoken_text="B-line")),
+        ]
+        result = apply_group_results(state, successes=acts, failures=[])
+        actors_in_history = [h["actor"] for h in result["history"] if h.get("actor") in ("a", "b")]
+        self.assertEqual(actors_in_history, ["a", "b"])
+
+    def test_end_scene_from_lower_priority_ignored(self):
+        state = self._state()
+        acts = [
+            ("a", build_resolved_act_payload(actor="a", mode="speak", target=None, content="A", spoken_text="A", should_end_scene=False)),
+            ("b", build_resolved_act_payload(actor="b", mode="speak", target=None, content="B", spoken_text="B", should_end_scene=True)),
+        ]
+        result = apply_group_results(state, successes=acts, failures=[])
+        self.assertFalse(result["runtime"]["resolved_act"]["should_end_scene"])
+
+    def test_failures_appended_as_system_message(self):
+        state = self._state()
+        acts = [("a", build_resolved_act_payload(actor="a", mode="speak", target=None, content="A", spoken_text="A"))]
+        result = apply_group_results(state, successes=acts, failures=[("b", "timeout")])
+        system_msgs = [h for h in result["history"] if h.get("message_kind") == "system"]
+        self.assertTrue(any("b" in str(h.get("content", "")) for h in system_msgs))
 
 
 if __name__ == "__main__":

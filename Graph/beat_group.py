@@ -3,6 +3,8 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable
 
+from Actor.ActorRuntime import apply_resolved_act
+
 
 def merge_group_flags(
     ordered_acts: list[tuple[str, dict[str, Any]]],
@@ -96,3 +98,59 @@ def run_actor_group(
     successes = [(aid, results[aid]) for aid in group if aid in results]
     failures = [(aid, errors[aid]) for aid in group if aid in errors]
     return successes, failures
+
+
+def apply_group_results(
+    state: dict[str, Any],
+    *,
+    successes: list[tuple[str, dict[str, Any]]],
+    failures: list[tuple[str, str]],
+    relationship_tuning: Any = None,
+    character_profiles: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    current = state
+    for _actor_id, resolved_act in successes:
+        current = {
+            **current,
+            "runtime": {**current["runtime"], "resolved_act": resolved_act},
+        }
+        current = apply_resolved_act(
+            current,
+            relationship_tuning,
+            character_profiles=character_profiles,
+        )
+
+    flags = merge_group_flags(successes)
+    resolved_after = dict(current["runtime"].get("resolved_act") or {})
+    if resolved_after:
+        resolved_after["should_end_scene"] = flags["should_end_scene"]
+        resolved_after["should_end_chapter"] = flags["should_end_chapter"]
+        merged_plot_flags = dict(resolved_after.get("triggered_plot_flags") or {})
+        merged_plot_flags.update(flags["triggered_plot_flags"])
+        resolved_after["triggered_plot_flags"] = merged_plot_flags
+        current = {
+            **current,
+            "runtime": {**current["runtime"], "resolved_act": resolved_after},
+        }
+
+    if failures:
+        failed_ids = "、".join(actor_id for actor_id, _err in failures)
+        next_turn = int(current["runtime"].get("turn_index", 0) or 0) + 1
+        current = {
+            **current,
+            "history": [
+                *current["history"],
+                {
+                    "turn": next_turn,
+                    "actor": None,
+                    "mode": "event",
+                    "content": f"（系统）以下角色本轮生成失败，已跳过：{failed_ids}。",
+                    "spoken_text": "",
+                    "nonverbal_action": "",
+                    "message_kind": "system",
+                },
+            ],
+            "runtime": {**current["runtime"], "turn_index": next_turn},
+        }
+
+    return current
