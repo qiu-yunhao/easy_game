@@ -17,6 +17,7 @@ class DirectorBrief(TypedDict):
     tension_target: float
     allow_interrupt: bool
     who_should_respond: list[str]
+    response_groups: list[list[str]]
     stage_actions: StageActions
     lead_in_text: str
     wrap_up_text: str
@@ -40,6 +41,7 @@ def empty_director_brief() -> DirectorBrief:
         "tension_target": 0.0,
         "allow_interrupt": False,
         "who_should_respond": [],
+        "response_groups": [],
         "stage_actions": empty_stage_actions(),
         "lead_in_text": "",
         "wrap_up_text": "",
