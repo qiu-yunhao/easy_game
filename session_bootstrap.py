@@ -25,6 +25,8 @@ from GameState import (
     create_initial_game_state,
     create_player_state,
 )
+from Actor import apply_resolved_act
+from Graph.contextual_scene_handoffs import apply_contextual_scene_progression
 from Graph.nodes import GraphDependencies
 from History import HistoryManager
 from Narrator.NarrationPresets import (
@@ -389,6 +391,7 @@ def build_runtime_dependencies(
             component_names=component_names,
             warm_clients_after_attach=warm_clients_after_attach,
         )
+    register_default_hooks(deps)
     return deps
 
 
@@ -406,3 +409,31 @@ def build_graph_dependencies(
         default_scene_config_builder=build_default_scene_config,
         warm_clients_after_attach=True,
     )
+
+
+def register_default_hooks(deps: GraphDependencies) -> None:
+    """Register default hooks that were previously separate subgraph steps.
+
+    - actor.after: history_commit → contextual_progression (order sensitive)
+    - narration.after: refresh_history (conditional memory refresh)
+    """
+    registry = deps.hook_registry
+
+    def _history_commit(state):
+        return apply_resolved_act(
+            state,
+            deps.gameplay_tuning.relationship,
+            character_profiles=deps.character_profiles,
+        )
+
+    def _contextual_progression(state):
+        return apply_contextual_scene_progression(state, deps.character_profiles)
+
+    def _refresh_history(state):
+        if deps.history_manager is None or not deps.history_manager.should_refresh(state):
+            return state
+        return {**state, "memory": deps.history_manager.build_memory(state)}
+
+    registry.register("actor.after", _history_commit)
+    registry.register("actor.after", _contextual_progression)
+    registry.register("narration.after", _refresh_history)
