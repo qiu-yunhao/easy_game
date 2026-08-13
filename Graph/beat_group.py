@@ -1,9 +1,25 @@
 from __future__ import annotations
 
+import logging
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable
 
 from Actor.ActorRuntime import apply_resolved_act
+
+logger = logging.getLogger(__name__)
+
+# Programming errors that must surface instead of being retried/swallowed as a
+# "generation failure". IO/API errors (timeout, rate limit, bad LLM output) fall
+# through to the retry path.
+_PROGRAMMING_ERRORS = (
+    AttributeError,
+    KeyError,
+    IndexError,
+    NameError,
+    TypeError,
+    ImportError,
+    AssertionError,
+)
 
 
 def merge_group_flags(
@@ -58,8 +74,15 @@ def _perform_with_retry(
         try:
             agent = resolve_agent(actor_id)
             return agent.perform_turn(state=actor_state, character_profiles=character_profiles)
-        except Exception as exc:  # noqa: BLE001 - retry any generation failure
+        except _PROGRAMMING_ERRORS:
+            # A code bug, not a transient generation failure — surface it.
+            logger.exception("actor %s raised a programming error; not retrying", actor_id)
+            raise
+        except Exception as exc:  # noqa: BLE001 - retry transient generation failures
             last_error = exc
+            logger.warning(
+                "actor %s generation attempt %d failed: %s", actor_id, _attempt + 1, exc
+            )
     raise last_error if last_error is not None else RuntimeError("unknown actor failure")
 
 
@@ -92,7 +115,10 @@ def run_actor_group(
         for future, actor_id in future_map.items():
             try:
                 results[actor_id] = future.result()
-            except Exception as exc:  # noqa: BLE001
+            except _PROGRAMMING_ERRORS:
+                # Let a code bug from any worker fail the whole beat loudly.
+                raise
+            except Exception as exc:  # noqa: BLE001 - transient failure → skip this actor
                 errors[actor_id] = str(exc)
 
     successes = [(aid, results[aid]) for aid in group if aid in results]

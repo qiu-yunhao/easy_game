@@ -185,6 +185,27 @@ class RunActorGroupTest(unittest.TestCase):
         self.assertEqual([aid for aid, _ in failures], ["a"])
         self.assertEqual(agents["a"].calls, 4)
 
+    def test_programming_error_surfaces_not_retried(self):
+        class BuggyAgent:
+            def __init__(self):
+                self.calls = 0
+
+            def perform_turn(self, state, character_profiles):
+                del state, character_profiles
+                self.calls += 1
+                raise AttributeError("typo'd attribute access")
+
+        agent = BuggyAgent()
+        state = _make_state()
+        with self.assertRaises(AttributeError):
+            run_actor_group(
+                state, group=["a"],
+                resolve_agent=lambda aid: agent,
+                character_profiles={}, max_retries=3,
+            )
+        # Surfaced immediately: no retry loop, not downgraded to a failure entry.
+        self.assertEqual(agent.calls, 1)
+
 
 class ApplyGroupResultsTest(unittest.TestCase):
     def _state(self):

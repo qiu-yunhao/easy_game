@@ -718,5 +718,61 @@ class ParallelGroupBeatTest(unittest.TestCase):
         self.assertEqual(state["runtime"]["pending_beat_actors"], [])
 
 
+    def test_group_path_emits_director_lead_in(self) -> None:
+        lead_in = "两人几乎同时开口，屋内的空气骤然绷紧。"
+
+        state = _build_state(
+            on_stage=["npc_a", "npc_b"],
+            focus_character=None,
+        )
+        profiles = _build_profiles(["player", "npc_a", "npc_b"])
+        deps = GraphDependencies(
+            scene_config={
+                "scene_id": "scene-1",
+                "default_location_id": "room",
+                "default_on_stage": ["npc_a", "npc_b"],
+            },
+            character_profiles=profiles,
+            director_agent=FakeDirector(
+                {
+                    "beat": "parallel",
+                    "beat_goal": "npc_a and npc_b speak independently",
+                    "focus_character": None,
+                    "tension_target": 0.3,
+                    "allow_interrupt": False,
+                    "who_should_respond": ["npc_a", "npc_b"],
+                    "response_groups": [["npc_a", "npc_b"]],
+                    "lead_in_text": lead_in,
+                    "stage_actions": {
+                        "enter": [],
+                        "leave": [],
+                        "suppress": [],
+                        "unsuppress": [],
+                    },
+                    "notes": [],
+                }
+            ),
+            actor_agent=FakeActor(),
+            narrator_agent=FakeNarratorAgent(),
+            stylistic_polish_agent=FakeStylisticPolishAgent(),
+            component_factory=ComponentFactory(),
+            agent_first=True,
+        )
+        register_default_hooks(deps)
+
+        state = director_node(state, deps)
+        state = scheduler_node(state, deps)
+        state = resolve_story_turn(state, deps)
+
+        # The beat's one-shot lead-in fires on the group path (regression: it was
+        # previously dropped because _group_step skipped director_lead_in).
+        lead_in_events = [
+            item for item in state["history"]
+            if item.get("narration_source") == "director_lead_in"
+        ]
+        self.assertEqual([item["content"] for item in lead_in_events], [lead_in])
+        self.assertEqual(state["director_brief"]["lead_in_text"], "")
+
+
 if __name__ == "__main__":
     unittest.main()

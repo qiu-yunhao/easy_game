@@ -414,6 +414,9 @@ def beat_resolution_node(state: GameState, deps: GraphDependencies) -> GameState
     def _group_step(current: GameState, group: list[str]) -> GameState:
         from Graph.beat_group import apply_group_results, run_actor_group
 
+        # Parallel groups skip the per-turn execution_subgraph, so emit the
+        # beat's one-shot director lead-in here to match the serial path.
+        current = director_lead_in_node(current, deps)
         successes, failures = run_actor_group(
             current,
             group=group,
