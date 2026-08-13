@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING, Any, Callable
 
 from GameState import GameState
 from Graph.graph_compile import NodeStep, compile_graph_with_nodes
@@ -8,6 +8,10 @@ from Graph.hookable_node import HookableNode
 
 if TYPE_CHECKING:
     from Graph.nodes import GraphDependencies
+
+# Emit newly committed history entries to a streaming consumer. Receives one
+# raw history dict per call, in commit order.
+BeatEventCallback = Callable[[dict[str, Any]], None]
 
 
 def build_beat_execution_subgraph(
@@ -104,6 +108,7 @@ def run_beat_loop(
     flush_step: NodeStep,
     wrap_step: NodeStep,
     group_step: Callable[[GameState, list[str]], GameState] | None = None,
+    on_event: BeatEventCallback | None = None,
 ) -> GameState:
     current = state
     safety_limit = max(
@@ -114,6 +119,20 @@ def run_beat_loop(
         + 1,
     )
     resolved_turns = 0
+
+    # Track how many history entries have already been streamed so each step
+    # only emits the entries it newly committed, in order.
+    emitted = len(current.get("history", []))
+
+    def _flush(next_state: GameState) -> GameState:
+        nonlocal emitted
+        if on_event is None:
+            return next_state
+        history = next_state.get("history", [])
+        for entry in history[emitted:]:
+            on_event(entry)
+        emitted = len(history)
+        return next_state
 
     while resolved_turns < safety_limit:
         if current["runtime"].get("scene_finished", False):
@@ -136,6 +155,7 @@ def run_beat_loop(
             current = _consume_group(current, group)
         else:
             current = execution_subgraph(current)
+        current = _flush(current)
         resolved_turns += 1
 
         if not beat_has_remaining_turns(current):
@@ -145,4 +165,4 @@ def run_beat_loop(
             "Beat resolution exceeded the safety limit before the director queue was exhausted."
         )
 
-    return wrap_step(flush_step(current))
+    return _flush(wrap_step(_flush(flush_step(current))))

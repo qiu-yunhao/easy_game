@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import threading
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Callable
 
 from CharacterRosterTools import CharacterRosterToolRuntime
 from CharacterProfile import ensure_character_profile, ensure_character_profiles
@@ -374,6 +374,44 @@ class WebGameSession:
             self.last_handoff_reason = self._advance_until_player_turn()
             return self.serialize_state()
 
+    def apply_player_action_streaming(
+        self,
+        raw_input: str,
+        on_event: Callable[[dict[str, Any]], None],
+    ) -> dict[str, Any]:
+        """Resolve a player action, streaming each committed history entry.
+
+        Returns the final full state snapshot (same shape as
+        ``apply_player_action``) so the client can reconcile non-history state
+        after the stream completes.
+        """
+        with self._lock:
+            if not self.story_initialized:
+                raise RuntimeError("请先初始化场景，再提交玩家动作。")
+            if self.state["runtime"].get("scene_finished", False):
+                raise RuntimeError("当前场景已经结束，请重置后继续。")
+            self._advance_until_player_turn()
+            if not is_player_turn(self.state):
+                raise RuntimeError("当前还没有轮到玩家行动。")
+
+            profiles = self.character_profiles
+            player_character = self.config.player_character
+
+            def _emit(entry: dict[str, Any]) -> None:
+                on_event(_serialize_history_entry(entry, player_character, profiles))
+
+            tool_response = self._maybe_handle_player_intent_plan_unlocked(raw_input)
+            if tool_response is not None:
+                # Tool path doesn't run the beat loop; replay its history so
+                # streaming clients still receive the new entries in order.
+                for entry in tool_response.get("history", []):
+                    on_event(entry)
+                return tool_response
+            self._player_interface.push_action(raw_input)
+            self.state = resolve_story_turn(self.state, self.deps, _emit)
+            self.last_handoff_reason = self._advance_until_player_turn(on_event=_emit)
+            return self.serialize_state()
+
     def _maybe_handle_player_intent_plan_unlocked(self, raw_input: str) -> dict[str, Any] | None:
         if not looks_like_tool_request(raw_input) or self.deps.player_command_tools is None:
             return None
@@ -592,7 +630,11 @@ class WebGameSession:
         if self.story_initialized and not self.state["runtime"].get("scene_finished", False) and self.state["runtime"].get("next_act") is None:
             self.state = prepare_chapter_turn(self.state, self.deps)
 
-    def _advance_until_player_turn(self, max_hops: int = 24) -> str:
+    def _advance_until_player_turn(
+        self,
+        max_hops: int = 24,
+        on_event: "Callable[[dict[str, Any]], None] | None" = None,
+    ) -> str:
         hops = 0
         npc_acted = False
         while hops < max_hops:
@@ -617,7 +659,7 @@ class WebGameSession:
                     if eligible
                     else "等待玩家定义下一步行动。"
                 )
-            self.state = resolve_story_turn(self.state, self.deps)
+            self.state = resolve_story_turn(self.state, self.deps, on_event)
             npc_acted = True
         raise RuntimeError("自动推进超过安全跳数，仍未到达稳定交接点。")
 

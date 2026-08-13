@@ -51,6 +51,9 @@ class StageboundRequestHandler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         print(f"[Stagebound] 正在处理 {parsed.path}", flush=True)
         started_at = time.perf_counter()
+        if parsed.path == "/api/action" and self._wants_event_stream():
+            self._handle_action_stream(parsed.path, started_at)
+            return
         try:
             status, payload = self._handle_post_api_request(parsed.path, self._read_json_body())
         except RuntimeError as exc:
@@ -60,6 +63,53 @@ class StageboundRequestHandler(BaseHTTPRequestHandler):
             self._write_error_with_log(parsed.path, HTTPStatus.INTERNAL_SERVER_ERROR, exc, started_at, label="未预期错误")
             return
         self._write_json_with_log(parsed.path, status, payload, started_at)
+
+    def _wants_event_stream(self) -> bool:
+        return "text/event-stream" in (self.headers.get("Accept", "") or "")
+
+    def _handle_action_stream(self, path: str, started_at: float) -> None:
+        try:
+            payload = self._read_json_body()
+        except RuntimeError as exc:
+            self._write_error_with_log(path, HTTPStatus.BAD_REQUEST, exc, started_at, label="请求失败")
+            return
+
+        try:
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Connection", "keep-alive")
+            self.send_header("X-Accel-Buffering", "no")
+            self.end_headers()
+        except (BrokenPipeError, ConnectionAbortedError, ConnectionResetError, OSError):
+            print("[Stagebound] 客户端在流开始前中断了连接。", flush=True)
+            return
+
+        def emit(entry: dict[str, Any]) -> None:
+            self._write_sse_event("entry", entry)
+
+        try:
+            final_state = self.server.session.apply_player_action_streaming(
+                str(payload.get("input", "")),
+                emit,
+            )
+        except Exception as exc:
+            self._write_sse_event("error", {"error": str(exc)})
+            elapsed_ms = int((time.perf_counter() - started_at) * 1000)
+            print(f"[Stagebound] 流式行动失败：{path} -> {exc}，耗时 {elapsed_ms}ms", flush=True)
+            return
+
+        self._write_sse_event("done", final_state)
+        elapsed_ms = int((time.perf_counter() - started_at) * 1000)
+        print(f"[Stagebound] 已完成流式 {path}，耗时 {elapsed_ms}ms", flush=True)
+
+    def _write_sse_event(self, event: str, data: dict[str, Any]) -> None:
+        body = f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+        try:
+            self.wfile.write(body.encode("utf-8"))
+            self.wfile.flush()
+        except (BrokenPipeError, ConnectionAbortedError, ConnectionResetError, OSError):
+            print("[Stagebound] 客户端在流写入过程中断了连接。", flush=True)
 
     def log_message(self, format: str, *args: object) -> None:
         return

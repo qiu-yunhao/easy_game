@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
+from typing import TYPE_CHECKING
 
 from GameState import GameState
 from Graph.graph_compile import compile_graph_with_nodes
@@ -20,6 +21,9 @@ from Graph.nodes import (
     story_premise_node,
 )
 from Graph.transition_nodes import chapter_archive_node, chapter_transition_node, scene_transition_node
+
+if TYPE_CHECKING:
+    from Graph.beat_subgraph import BeatEventCallback
 
 
 STORY_AUTHORING_NODES = (
@@ -142,13 +146,13 @@ def initialize_story_session(state: GameState, deps: GraphDependencies) -> GameS
     return prepare_chapter_turn(prepare_story_setup(state, deps), deps)
 
 
-def resolve_story_turn(state: GameState, deps: GraphDependencies) -> GameState:
-    return _run_story_steps(
-        state,
-        deps,
-        beat_resolution_node,
-        *(node for _, node in TRANSITION_NODES),
-    )
+def resolve_story_turn(
+    state: GameState,
+    deps: GraphDependencies,
+    on_event: "BeatEventCallback | None" = None,
+) -> GameState:
+    state = beat_resolution_node(state, deps, on_event)
+    return _run_story_steps(state, deps, *(node for _, node in TRANSITION_NODES))
 
 
 def plan_story_round(state: GameState, deps: GraphDependencies) -> GameState:

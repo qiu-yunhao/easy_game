@@ -853,43 +853,65 @@ function scrollHistoryToBottom() {
   });
 }
 
+function buildHistoryCard(entry) {
+  const presentation = classifyMessage(entry);
+  const timestamp = resolveHistoryTimestamp(entry);
+  const article = document.createElement("article");
+  article.className = ["message-card", presentation.variant, presentation.tone].filter(Boolean).join(" ");
+  article.innerHTML = `
+    <div class="message-top">
+      <div class="message-copy">
+        <span class="message-channel">${escapeHtml(presentation.channel)}</span>
+        <strong>${escapeHtml(presentation.speaker)}</strong>
+        <span class="message-role">${escapeHtml(presentation.role)}</span>
+      </div>
+      <div class="message-meta-line">
+        <span class="message-badge">${escapeHtml(presentation.primaryBadge)}</span>
+        <span class="message-badge">${escapeHtml(formatTurnLabel(entry?.turn))}</span>
+        <span class="message-badge">${escapeHtml(formatClock(timestamp))}</span>
+      </div>
+    </div>
+    <p class="message-content">${escapeHtml(resolveMessageContent(entry))}</p>
+  `;
+  return article;
+}
+
+function renderHistoryEmptyState() {
+  storyFeed.innerHTML = `
+    <div class="chat-empty">
+      <strong>等待剧情开始</strong>
+      <p>发送一条消息后，这里会分层展示你的行动、角色回应、系统旁白与功能回执。</p>
+    </div>
+  `;
+}
+
 function renderHistory(history) {
   const entries = Array.isArray(history) ? history : [];
   storyFeed.innerHTML = "";
 
   if (!entries.length) {
-    storyFeed.innerHTML = `
-      <div class="chat-empty">
-        <strong>等待剧情开始</strong>
-        <p>发送一条消息后，这里会分层展示你的行动、角色回应、系统旁白与功能回执。</p>
-      </div>
-    `;
+    renderHistoryEmptyState();
     return;
   }
 
   entries.forEach((entry) => {
-    const presentation = classifyMessage(entry);
-    const timestamp = resolveHistoryTimestamp(entry);
-    const article = document.createElement("article");
-    article.className = ["message-card", presentation.variant, presentation.tone].filter(Boolean).join(" ");
-    article.innerHTML = `
-      <div class="message-top">
-        <div class="message-copy">
-          <span class="message-channel">${escapeHtml(presentation.channel)}</span>
-          <strong>${escapeHtml(presentation.speaker)}</strong>
-          <span class="message-role">${escapeHtml(presentation.role)}</span>
-        </div>
-        <div class="message-meta-line">
-          <span class="message-badge">${escapeHtml(presentation.primaryBadge)}</span>
-          <span class="message-badge">${escapeHtml(formatTurnLabel(entry?.turn))}</span>
-          <span class="message-badge">${escapeHtml(formatClock(timestamp))}</span>
-        </div>
-      </div>
-      <p class="message-content">${escapeHtml(resolveMessageContent(entry))}</p>
-    `;
-    storyFeed.appendChild(article);
+    storyFeed.appendChild(buildHistoryCard(entry));
   });
 
+  scrollHistoryToBottom();
+}
+
+// Incrementally append a single streamed entry without a full re-render.
+// Clears the empty-state placeholder on first append.
+function appendHistoryEntry(entry) {
+  if (!entry) {
+    return;
+  }
+  const placeholder = storyFeed.querySelector(".chat-empty");
+  if (placeholder) {
+    storyFeed.innerHTML = "";
+  }
+  storyFeed.appendChild(buildHistoryCard(entry));
   scrollHistoryToBottom();
 }
 
@@ -1135,6 +1157,102 @@ async function requestJson(url, options = {}) {
   } catch (error) {
     if (error?.name === "AbortError") {
       throw new Error(timeoutMessage);
+    }
+    throw error;
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
+}
+
+// Stream a player action over SSE. Calls onEntry for each committed history
+// entry as it arrives, and returns the final full state snapshot from the
+// terminating "done" event. Throws on an "error" event or transport failure.
+async function streamAction(url, body, { timeoutMs = REQUEST_TIMEOUT_MS, timeoutMessage, onEntry } = {}) {
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "text/event-stream",
+      },
+      body,
+      signal: controller.signal,
+    });
+
+    if (!response.ok || !response.body) {
+      let message = "请求失败。";
+      try {
+        const payload = await response.json();
+        message = payload.error || message;
+      } catch (error) {
+        // Non-JSON error body — keep the default message.
+      }
+      throw new Error(message);
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let finalState = null;
+    let streamError = null;
+
+    const dispatch = (rawEvent) => {
+      const lines = rawEvent.split("\n");
+      let eventName = "message";
+      const dataLines = [];
+      for (const line of lines) {
+        if (line.startsWith("event:")) {
+          eventName = line.slice(6).trim();
+        } else if (line.startsWith("data:")) {
+          dataLines.push(line.slice(5).trim());
+        }
+      }
+      if (!dataLines.length) {
+        return;
+      }
+      let data;
+      try {
+        data = JSON.parse(dataLines.join("\n"));
+      } catch (error) {
+        return;
+      }
+      if (eventName === "entry") {
+        if (typeof onEntry === "function") {
+          onEntry(data);
+        }
+      } else if (eventName === "done") {
+        finalState = data;
+      } else if (eventName === "error") {
+        streamError = new Error(data.error || "流式处理失败。");
+      }
+    };
+
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) {
+        break;
+      }
+      buffer += decoder.decode(value, { stream: true });
+      let separatorIndex;
+      while ((separatorIndex = buffer.indexOf("\n\n")) !== -1) {
+        const rawEvent = buffer.slice(0, separatorIndex);
+        buffer = buffer.slice(separatorIndex + 2);
+        dispatch(rawEvent);
+      }
+    }
+    if (buffer.trim()) {
+      dispatch(buffer);
+    }
+
+    if (streamError) {
+      throw streamError;
+    }
+    return finalState;
+  } catch (error) {
+    if (error?.name === "AbortError") {
+      throw new Error(timeoutMessage || "请求超时，请稍后重试。");
     }
     throw error;
   } finally {
@@ -1490,18 +1608,25 @@ async function handleSubmit() {
     setText(parserStatus, "正在解析意图");
     setPipelineState("parse");
 
-    const state = await requestJson(API.action, {
-      method: "POST",
+    let firstEntrySeen = false;
+    const state = await streamAction(API.action, JSON.stringify({ input: draft }), {
       timeoutMs: ACTION_REQUEST_TIMEOUT_MS,
       timeoutMessage: "行动处理超过 300 秒，请稍后重试。",
-      body: JSON.stringify({
-        input: draft,
-      }),
+      onEntry: (entry) => {
+        if (!firstEntrySeen) {
+          firstEntrySeen = true;
+          setPipelineState("commit");
+          setText(parserStatus, "正在生成剧情");
+          clearPlayerDraft();
+        }
+        appendHistoryEntry(entry);
+      },
     });
 
-    await sleep(120);
     setPipelineState("commit");
-    renderState(state, { jsonLabel: "行动返回" });
+    if (state) {
+      renderState(state, { jsonLabel: "行动返回" });
+    }
     clearPlayerDraft();
   } catch (error) {
     renderRequestError("行动处理失败", error);

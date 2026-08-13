@@ -9,6 +9,7 @@ from CharacterProfile import CharacterProfile
 from ComponentFactory import ComponentFactory
 from Graph.actor_paths import resolve_npc_turn_state, resolve_player_turn_state
 from Graph.beat_subgraph import (
+    BeatEventCallback,
     build_beat_execution_subgraph,
     is_player_turn,
     run_beat_loop,
@@ -389,7 +390,11 @@ def scheduler_node(state: GameState, deps: GraphDependencies) -> GameState:
     return apply_scheduler_decision(state, decision)
 
 
-def beat_resolution_node(state: GameState, deps: GraphDependencies) -> GameState:
+def beat_resolution_node(
+    state: GameState,
+    deps: GraphDependencies,
+    on_event: BeatEventCallback | None = None,
+) -> GameState:
     execution_subgraph = deps.beat_execution_subgraph
     if execution_subgraph is None:
         # Lazy import breaks Graph.nodes <-> Graph.beat_nodes circular dependency.
@@ -442,6 +447,7 @@ def beat_resolution_node(state: GameState, deps: GraphDependencies) -> GameState
         flush_step=lambda current: narration_subgraph_node(current, deps, force_flush=True),
         wrap_step=lambda current: director_wrap_up_node(current, deps),
         group_step=_group_step,
+        on_event=on_event,
     )
 
 
