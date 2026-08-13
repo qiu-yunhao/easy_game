@@ -16,7 +16,7 @@ class _OpenAI:  # pragma: no cover - import shim for local tests
 openai_stub.OpenAI = _OpenAI
 sys.modules.setdefault("openai", openai_stub)
 
-from actor_create_agent import ActorCreateAgent
+from Actor.ActorCreateAgent import ActorCreateAgent
 from CharacterProfile import ensure_character_profile, promote_character_profile_to_l1
 from GameState import create_character_runtime_state, create_initial_game_state, create_player_state
 from SupportingSceneIntentPolicy import SupportingSceneIntentPolicy

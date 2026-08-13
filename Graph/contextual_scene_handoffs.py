@@ -8,7 +8,7 @@ from ScenePlan import ScenePlan
 from StoryStateUtils import clean_text as _clean_text
 
 if TYPE_CHECKING:
-    from actor_create_agent import ActorCreateAgent
+    from Actor.ActorCreateAgent import ActorCreateAgent
     from SceneConfig import SceneConfig
 
 

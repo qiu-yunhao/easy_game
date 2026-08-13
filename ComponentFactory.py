@@ -11,7 +11,7 @@ if TYPE_CHECKING:
     from Actor.ActorAgent import ActorAgent
     from Actor.L1ActorAgent import L1ActorAgent
     from Actor.L2ActorAgent import L2ActorAgent
-    from actor_create_agent import ActorCreateAgent
+    from Actor.ActorCreateAgent import ActorCreateAgent
     from Director.DirectorAgent import DirectorAgent
     from Director.DirectorFormatter import DirectorFormatter
     from History.HistorySummarizerAgent import HistorySummarizerAgent

@@ -1,6 +1,20 @@
+"""ActorCreateAgent 类拆分产物。
+
+本文件是 `actor_create_agent.py` 拆分后的第 4 个模块，仅保留
+`ActorCreateAgent` 类本体。配套模块分工如下：
+
+- `Actor.ActorCreateSchema`：JSON Schema、容量常量 (MAX_L1_AGENTS/
+  MAX_L2_AGENTS/MAX_STORY_CHARACTERS) 及 BACKSTORY_RELATION_HINTS。
+- `Actor.ActorCreatePrompt`：系统提示词 ACTOR_CREATE_SYSTEM_PROMPT。
+- `Actor.ActorCreateHeuristics`：`_` 前缀的启发式辅助函数（分配层级、
+  分配章节、构造 character_id 等）。
+
+本模块只负责组织 Prompt、调用 LLM、并把返回结果归一化为
+CharacterProfile 集合，方法体一字未改（仅追加中文 docstring）。
+"""
+
 from __future__ import annotations
 
-import re
 from typing import TYPE_CHECKING, Any, Mapping
 
 from BaseAgent import AgentMessage, BaseAgent
@@ -25,561 +39,51 @@ from StoryStateUtils import (
 )
 from StoryToolContext import build_story_tool_prompt_context
 
+from Actor.ActorCreatePrompt import ACTOR_CREATE_SYSTEM_PROMPT
+from Actor.ActorCreateSchema import (
+    ACTOR_CREATE_RESPONSE_SCHEMA,
+    CONTEXTUAL_ACTOR_RESPONSE_SCHEMA,
+    MAX_L1_AGENTS,
+    MAX_L2_AGENTS,
+    MAX_STORY_CHARACTERS,
+)
+from Actor.ActorCreateHeuristics import (
+    _assign_chapter_ids,
+    _build_character_id,
+    _build_layer_assignment_seed,
+    _resolve_effective_roster_counts,
+    _resolve_story_agent_type,
+    _respect_agent_layer_limits,
+    _respect_player_bound_capacity,
+)
+
 if TYPE_CHECKING:
     from CharacterProfile import CharacterProfile
     from GameState import GameState
     from SceneConfig import SceneConfig
 
 
-MAX_L1_AGENTS = 6
-MAX_L2_AGENTS = 15
-MAX_STORY_CHARACTERS = MAX_L1_AGENTS + MAX_L2_AGENTS
-BACKSTORY_RELATION_HINTS = (
-    "妹妹",
-    "弟弟",
-    "哥哥",
-    "姐姐",
-    "师父",
-    "师尊",
-    "师兄",
-    "师姐",
-    "师弟",
-    "师妹",
-    "父亲",
-    "母亲",
-    "爷爷",
-    "奶奶",
-    "外公",
-    "外婆",
-    "宿敌",
-    "挚友",
-    "青梅",
-    "道侣",
-    "同门",
-    "族长",
-)
-
-L2_PROFILE_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "core_drive": {"type": "string", "minLength": 1},
-        "judgement_preference": {
-            "type": "array",
-            "items": {"type": "string"},
-            "minItems": 1,
-            "maxItems": 2,
-        },
-        "behavior_rule": {
-            "type": "array",
-            "items": {"type": "string"},
-            "minItems": 1,
-            "maxItems": 2,
-        },
-        "speech_style": {
-            "type": "array",
-            "items": {"type": "string"},
-            "minItems": 1,
-            "maxItems": 2,
-        },
-        "personality_tags": {
-            "type": "array",
-            "items": {"type": "string"},
-        },
-    },
-    "required": [
-        "core_drive",
-        "judgement_preference",
-        "behavior_rule",
-        "speech_style",
-        "personality_tags",
-    ],
-    "additionalProperties": False,
-}
-
-L1_PROFILE_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "core_conflict": {"type": "string", "minLength": 1},
-        "outer_goal": {"type": "string", "minLength": 1},
-        "inner_need": {"type": "string", "minLength": 1},
-        "contradiction_axes": {
-            "type": "array",
-            "items": {"type": "string"},
-        },
-        "relationship_pressure": {
-            "type": "array",
-            "items": {"type": "string"},
-        },
-    },
-    "required": [
-        "core_conflict",
-        "outer_goal",
-        "inner_need",
-        "contradiction_axes",
-        "relationship_pressure",
-    ],
-    "additionalProperties": False,
-}
-
-LAYER_ASSIGNMENT_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "mentioned_in_player_backstory": {"type": "boolean"},
-        "plot_significance": {
-            "type": "string",
-            "enum": ["core", "supporting", "replaceable"],
-        },
-        "relationship_depth": {
-            "type": "string",
-            "enum": ["deep", "functional", "unknown"],
-        },
-        "long_term_plot_significance": {"type": "boolean"},
-        "can_promote_to_l1": {"type": "boolean"},
-        "assignment_reason": {"type": "string"},
-    },
-    "required": [
-        "mentioned_in_player_backstory",
-        "plot_significance",
-        "relationship_depth",
-        "long_term_plot_significance",
-        "can_promote_to_l1",
-        "assignment_reason",
-    ],
-    "additionalProperties": False,
-}
-
-SUPPORTING_CHARACTER_PROPERTIES = {
-    "character_id": {"type": "string", "minLength": 1},
-    "name": {"type": "string", "minLength": 1},
-    "story_role": {"type": "string", "minLength": 1},
-    "persona": {
-        "type": "array",
-        "items": {"type": "string"},
-    },
-    "base_style": {"type": "string", "minLength": 1},
-    "background": {"type": "string", "minLength": 1},
-    "occupation": {"type": "string"},
-    "secrets": {
-        "type": "array",
-        "items": {"type": "string"},
-    },
-    "gender": {"type": "string"},
-    "race": {"type": "string"},
-    "agent_type": {
-        "type": "string",
-        "enum": ["actor", "L2", "L1"],
-    },
-    "layer_assignment": LAYER_ASSIGNMENT_SCHEMA,
-    "l2_profile": L2_PROFILE_SCHEMA,
-    "l1_profile": L1_PROFILE_SCHEMA,
-    "spiritual_root": {"type": "string"},
-    "realm": {"type": "string"},
-    "main_technique": {"type": "string"},
-    "base_relationship": {
-        "type": "object",
-        "additionalProperties": {"type": "number"},
-    },
-    "planned_chapter_count": {
-        "type": "integer",
-        "minimum": 0,
-        "maximum": 20,
-    },
-    "planned_chapter_ids": {
-        "type": "array",
-        "items": {"type": "string"},
-    },
-    "introduction_hint": {"type": "string"},
-}
-
-SUPPORTING_CHARACTER_REQUIRED = [
-    "character_id",
-    "name",
-    "story_role",
-    "persona",
-    "base_style",
-    "background",
-    "secrets",
-    "agent_type",
-    "layer_assignment",
-    "spiritual_root",
-    "realm",
-    "main_technique",
-    "base_relationship",
-    "planned_chapter_count",
-    "planned_chapter_ids",
-    "introduction_hint",
-]
-
-
-ACTOR_CREATE_RESPONSE_SCHEMA = {
-    "type": "json_schema",
-    "json_schema": {
-        "name": "actor_create_supporting_cast",
-        "schema": {
-            "type": "object",
-            "properties": {
-                "characters": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "properties": SUPPORTING_CHARACTER_PROPERTIES,
-                        "required": SUPPORTING_CHARACTER_REQUIRED,
-                        "additionalProperties": False,
-                    },
-                },
-            },
-            "required": ["characters"],
-            "additionalProperties": False,
-        },
-    },
-}
-
-
-CONTEXTUAL_ACTOR_RESPONSE_SCHEMA = {
-    "type": "json_schema",
-    "json_schema": {
-        "name": "actor_create_contextual_actor",
-        "schema": {
-            "type": "object",
-            "properties": {
-                "actor": {
-                    "type": "object",
-                    "properties": SUPPORTING_CHARACTER_PROPERTIES,
-                    "required": SUPPORTING_CHARACTER_REQUIRED,
-                    "additionalProperties": False,
-                },
-            },
-            "required": ["actor"],
-            "additionalProperties": False,
-        },
-    },
-}
-
-
-ACTOR_CREATE_SYSTEM_PROMPT = """
-You are the Story Layer and Cast Architect for an open-world xianxia roleplay game.
-Your job is to supplement the cast so later Actor agents have concrete character settings to play,
-and to assign each new role into the correct interactive layer.
-
-Rules:
-- Return strict JSON only.
-- Never exceed the provided player-bound L1/L2 limits unless the role is explicitly protected by the player-backstory rule.
-- Base `actor` roles are reusable ActorAgent templates and are not constrained by the L1/L2 caps.
-- Before creating or upgrading any role, inspect the provided `character_roster_snapshot`.
-- When `loaded_tool_skills` is provided, inspect those skill modules first and follow their tool contracts exactly.
-- If the roster snapshot shows that an L1 or L2 layer is already full, reuse an existing role or downgrade the function unless the player-backstory rule explicitly protects the role.
-- Reuse existing supporting character ids when the same person already exists.
-- If no story outline exists yet, only extract characters that the player clearly implied in the background.
-- If a story outline exists, create only the minimum supplemental cast needed to support those chapters.
-- Do not return the player character as a new character.
-- Every character needs a distinct dramatic function and practical reason to appear.
-- Every character must include `spiritual_root`, `realm`, and `main_technique`, even when they are ordinary defaults.
-- You are also responsible for `agent_type` assignment:
-  - Use base `actor` for reusable functional roles that mainly provide atmosphere, logistics, simple guidance, or one-shot scene support.
-  - Any character clearly mentioned in the player's background by name, title, or explicit relationship must be at least interactive (`L2` or `L1`), never a discardable background extra.
-  - Use `L1` for long-term mainline roles, deep bonds, irreplaceable rivals, blood/fate ties, or characters expected to carry major turning points across chapters.
-  - Use `L2` for important but softer support roles that mainly serve a scene, chapter, route, or short-term functional need.
-  - Prefer `actor` when the role is replaceable, single-purpose, and does not need long-lived autonomous planning.
-  - If a background-mentioned role matters but their long-term weight is still unclear, choose `L2`, not `L1`.
-  - You may mark an `L2` with `layer_assignment.can_promote_to_l1 = true` when the role could later be upgraded.
-- Every generated role must include `layer_assignment`.
-- If `agent_type = "L2"`, include a compact `l2_profile`.
-- If `agent_type = "L1"`, include a complete `l1_profile`.
-- `planned_chapter_ids` may only use chapter ids that were provided to you.
-"""
-
-def _build_character_id(
-    *,
-    raw_id: str,
-    name: str,
-    character_profiles: dict[str, "CharacterProfile"],
-    used_ids: set[str],
-    fallback_index: int,
-) -> str:
-    if raw_id and raw_id in character_profiles:
-        return raw_id
-    if name:
-        for character_id, profile in character_profiles.items():
-            if clean_text(profile.get("name", "")) == name:
-                return character_id
-
-    candidate = re.sub(r"[^a-z0-9]+", "_", raw_id.lower()).strip("_")
-    if not candidate:
-        candidate = re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_")
-    if not candidate:
-        candidate = f"supporting_{fallback_index}"
-
-    resolved = candidate
-    suffix = 2
-    while resolved in character_profiles or resolved in used_ids:
-        resolved = f"{candidate}_{suffix}"
-        suffix += 1
-    return resolved
-
-
-def _assign_chapter_ids(
-    *,
-    outline_ids: list[str],
-    start_index: int,
-    planned_chapter_count: int,
-) -> list[str]:
-    if not outline_ids or planned_chapter_count <= 0:
-        return []
-
-    chapter_ids: list[str] = []
-    bounded_start = max(0, min(start_index, len(outline_ids) - 1))
-    for chapter_id in outline_ids[bounded_start:]:
-        if chapter_id not in chapter_ids:
-            chapter_ids.append(chapter_id)
-        if len(chapter_ids) >= planned_chapter_count:
-            break
-
-    if len(chapter_ids) < planned_chapter_count:
-        for chapter_id in outline_ids:
-            if chapter_id not in chapter_ids:
-                chapter_ids.append(chapter_id)
-            if len(chapter_ids) >= planned_chapter_count:
-                break
-
-    return chapter_ids
-
-
-def _contains_backstory_signal(player_background: str, candidate_text: str) -> bool:
-    background = clean_text(player_background)
-    candidate = clean_text(candidate_text)
-    if not background or not candidate:
-        return False
-    if len(candidate) >= 2 and candidate in background:
-        return True
-    return any(hint in candidate and hint in background for hint in BACKSTORY_RELATION_HINTS)
-
-
-def _infer_backstory_priority(
-    raw_character: Mapping[str, Any],
-    existing_profile: Mapping[str, Any],
-    *,
-    player_background: str,
-) -> bool:
-    for source in (raw_character.get("layer_assignment"), existing_profile.get("layer_assignment")):
-        if isinstance(source, Mapping) and isinstance(source.get("mentioned_in_player_backstory"), bool):
-            return bool(source.get("mentioned_in_player_backstory"))
-
-    for candidate_text in (
-        raw_character.get("name", ""),
-        raw_character.get("story_role", ""),
-        raw_character.get("introduction_hint", ""),
-        existing_profile.get("name", ""),
-        existing_profile.get("story_role", ""),
-        existing_profile.get("introduction_hint", ""),
-    ):
-        if _contains_backstory_signal(player_background, clean_text(candidate_text)):
-            return True
-    return False
-
-
-def _build_layer_assignment_seed(
-    raw_character: Mapping[str, Any],
-    existing_profile: Mapping[str, Any],
-    *,
-    player_background: str,
-    planned_chapter_count: int,
-    planned_chapter_ids: list[str],
-) -> dict[str, Any]:
-    explicit_assignment = raw_character.get("layer_assignment")
-    explicit_assignment = explicit_assignment if isinstance(explicit_assignment, Mapping) else {}
-    existing_assignment = existing_profile.get("layer_assignment")
-    existing_assignment = existing_assignment if isinstance(existing_assignment, Mapping) else {}
-
-    mentioned_in_player_backstory = _infer_backstory_priority(
-        raw_character,
-        existing_profile,
-        player_background=player_background,
-    )
-    plot_significance = clean_text(
-        explicit_assignment.get("plot_significance", ""),
-        clean_text(existing_assignment.get("plot_significance", ""), "supporting"),
-    ).lower()
-    if plot_significance not in {"core", "supporting", "replaceable"}:
-        plot_significance = "supporting"
-
-    relationship_depth = clean_text(
-        explicit_assignment.get("relationship_depth", ""),
-        clean_text(existing_assignment.get("relationship_depth", ""), "unknown"),
-    ).lower()
-    if relationship_depth not in {"deep", "functional", "unknown"}:
-        relationship_depth = "functional" if mentioned_in_player_backstory else "unknown"
-
-    explicit_long_term = explicit_assignment.get("long_term_plot_significance")
-    existing_long_term = existing_assignment.get("long_term_plot_significance")
-    long_term_plot_significance = (
-        bool(explicit_long_term)
-        if isinstance(explicit_long_term, bool)
-        else (
-            bool(existing_long_term)
-            if isinstance(existing_long_term, bool)
-            else planned_chapter_count >= 2 or len(planned_chapter_ids) >= 2
-        )
-    )
-
-    assignment_reason = clean_text(
-        explicit_assignment.get("assignment_reason", ""),
-        clean_text(existing_assignment.get("assignment_reason", "")),
-    )
-    if not assignment_reason:
-        if mentioned_in_player_backstory and long_term_plot_significance:
-            assignment_reason = "player_backstory_long_term"
-        elif mentioned_in_player_backstory:
-            assignment_reason = "player_backstory_interactive_floor"
-        elif plot_significance == "core":
-            assignment_reason = "core_plot_weight"
-        else:
-            assignment_reason = "supporting_plot_need"
-
-    explicit_can_promote = explicit_assignment.get("can_promote_to_l1")
-    existing_can_promote = existing_assignment.get("can_promote_to_l1")
-    can_promote_to_l1 = (
-        bool(explicit_can_promote)
-        if isinstance(explicit_can_promote, bool)
-        else (
-            bool(existing_can_promote)
-            if isinstance(existing_can_promote, bool)
-            else bool(
-                mentioned_in_player_backstory
-                or long_term_plot_significance
-                or plot_significance == "supporting"
-            )
-        )
-    )
-
-    return {
-        "mentioned_in_player_backstory": mentioned_in_player_backstory,
-        "plot_significance": plot_significance,
-        "relationship_depth": relationship_depth,
-        "long_term_plot_significance": long_term_plot_significance,
-        "can_promote_to_l1": can_promote_to_l1,
-        "assignment_reason": assignment_reason,
-    }
-
-
-def _resolve_story_agent_type(
-    raw_character: Mapping[str, Any],
-    existing_profile: Mapping[str, Any],
-    *,
-    layer_assignment_seed: Mapping[str, Any],
-    planned_chapter_count: int,
-    planned_chapter_ids: list[str],
-) -> str:
-    explicit_agent_type = clean_text(
-        raw_character.get("agent_type", ""),
-        clean_text(existing_profile.get("agent_type", "")),
-    )
-    if explicit_agent_type not in {"actor", "L1", "L2"}:
-        explicit_agent_type = ""
-
-    mentioned_in_player_backstory = bool(layer_assignment_seed.get("mentioned_in_player_backstory", False))
-    long_term_plot_significance = bool(layer_assignment_seed.get("long_term_plot_significance", False))
-    plot_significance = clean_text(layer_assignment_seed.get("plot_significance", ""), "supporting")
-    relationship_depth = clean_text(layer_assignment_seed.get("relationship_depth", ""), "unknown")
-    multi_chapter_presence = planned_chapter_count >= 2 or len(planned_chapter_ids) >= 2
-
-    if mentioned_in_player_backstory:
-        if explicit_agent_type == "L1":
-            return "L1"
-        if long_term_plot_significance or plot_significance == "core" or relationship_depth == "deep":
-            return "L1"
-        return "L2"
-
-    if explicit_agent_type:
-        return explicit_agent_type
-    if long_term_plot_significance or multi_chapter_presence or plot_significance == "core":
-        return "L1"
-    if plot_significance == "replaceable":
-        return "actor"
-    return "L2"
-
-
-def _count_story_layers(character_profiles: dict[str, "CharacterProfile"]) -> tuple[int, int]:
-    l1_count = 0
-    l2_count = 0
-    for profile in character_profiles.values():
-        agent_type = clean_text(profile.get("agent_type", ""), "actor")
-        if agent_type == "L1":
-            l1_count += 1
-        elif agent_type == "L2":
-            l2_count += 1
-    return l1_count, l2_count
-
-
-def _resolve_effective_roster_counts(
-    character_profiles: dict[str, "CharacterProfile"],
-    character_roster_snapshot: Mapping[str, Any] | None,
-) -> tuple[int, int, int]:
-    local_l1_count, local_l2_count = _count_story_layers(character_profiles)
-    local_actor_count = sum(
-        1
-        for character_id, profile in character_profiles.items()
-        if character_id != "player" and clean_text(profile.get("agent_type", "actor"), "actor") == "actor"
-    )
-    summary = (
-        character_roster_snapshot.get("summary", {})
-        if isinstance(character_roster_snapshot, Mapping)
-        else {}
-    )
-    roster_l1_count = int(summary.get("total_L1", 0) or 0) if isinstance(summary, Mapping) else 0
-    roster_l2_count = int(summary.get("total_L2", 0) or 0) if isinstance(summary, Mapping) else 0
-    roster_actor_count = int(summary.get("total_ActorAgent", 0) or 0) if isinstance(summary, Mapping) else 0
-    return (
-        max(local_l1_count, roster_l1_count),
-        max(local_l2_count, roster_l2_count),
-        max(local_actor_count, roster_actor_count),
-    )
-
-
-def _respect_agent_layer_limits(
-    *,
-    resolved_agent_type: str,
-    layer_assignment: Mapping[str, Any],
-    existing_l1_count: int,
-    existing_l2_count: int,
-    new_l1_count: int,
-    new_l2_count: int,
-) -> str:
-    mentioned_in_player_backstory = bool(layer_assignment.get("mentioned_in_player_backstory", False))
-    if resolved_agent_type == "L1":
-        if existing_l1_count + new_l1_count < MAX_L1_AGENTS or mentioned_in_player_backstory:
-            return "L1"
-        resolved_agent_type = "L2"
-    if resolved_agent_type == "L2":
-        if existing_l2_count + new_l2_count < MAX_L2_AGENTS or mentioned_in_player_backstory:
-            return "L2"
-    return "actor"
-
-
-def _respect_player_bound_capacity(
-    *,
-    resolved_agent_type: str,
-    layer_assignment: Mapping[str, Any],
-    max_total_characters: int,
-    existing_l1_count: int,
-    existing_l2_count: int,
-    new_l1_count: int,
-    new_l2_count: int,
-) -> str:
-    if resolved_agent_type not in {"L1", "L2"}:
-        return resolved_agent_type
-    if max_total_characters <= 0:
-        return resolved_agent_type if bool(layer_assignment.get("mentioned_in_player_backstory", False)) else "actor"
-
-    current_story_bound_count = existing_l1_count + existing_l2_count + new_l1_count + new_l2_count
-    if current_story_bound_count < max_total_characters or bool(
-        layer_assignment.get("mentioned_in_player_backstory", False)
-    ):
-        return resolved_agent_type
-    return "actor"
-
-
 class ActorCreateAgent(BaseAgent):
+    """负责生成/维护故事支线角色的 Agent。
+
+    职责概览：
+
+    - ``build_instruction``：构造"补齐故事支线阵容"的完整指令，
+      作为主要 sync 路径的 Prompt。
+    - ``build_contextual_actor_instruction``：场景 handoff 时，
+      临场生成单个可立即上台的 ActorAgent 的 Prompt。
+    - ``normalize_supporting_cast``：把 LLM 返回的 characters 列表
+      归一化为 CharacterProfile 字典（含容量、层级、章节等约束）。
+    - ``normalize_contextual_actor``：单角色版归一化，返回单个
+      CharacterProfile 或 None。
+    - ``sync_supporting_cast``：build_instruction → LLM → normalize
+      的一站式入口。
+    - ``create_contextual_actor``：build_contextual_actor_instruction
+      → LLM → normalize_contextual_actor 的一站式入口。
+    """
+
     def __init__(self, **kwargs: Any) -> None:
+        # 初始化基础 Agent，并可选绑定 CharacterRosterToolRuntime。
         character_roster_tool_runtime = kwargs.pop("character_roster_tool_runtime", None)
         super().__init__(
             system_prompt=ACTOR_CREATE_SYSTEM_PROMPT,
@@ -593,6 +97,7 @@ class ActorCreateAgent(BaseAgent):
         self,
         tool_runtime: CharacterRosterToolRuntime | None,
     ) -> None:
+        # 在运行时绑定/替换 CharacterRosterToolRuntime。
         self.character_roster_tool_runtime = tool_runtime
 
     def build_instruction(
@@ -606,6 +111,22 @@ class ActorCreateAgent(BaseAgent):
         character_roster_tool_runtime: CharacterRosterToolRuntime | None = None,
         resolved_snapshots: dict[str, Any] | None = None,
     ) -> str:
+        """构造 supporting_cast 主指令 Prompt。
+
+        输入：当前 ``game_state``、``scene_config``、已有 ``character_profiles``、
+        容量上限，以及可选的 roster 快照 / 工具运行时。
+
+        四段构造：
+
+        1. 玩家画像 + 背景（player_profile + background 字段）。
+        2. ``outline_entries``：从 plot.story_outline 抽取章节骨架。
+        3. ``character_roster_snapshot``：通过
+           ``build_story_tool_prompt_context`` 注入角色花名册上下文。
+        4. ``render_json_instruction``：包上 JSON 硬约束的最终指令。
+
+        返回：拼装好的字符串指令（供 ``command`` 使用），本方法本身
+        不直接产生 ``list[AgentMessage]``——历史消息由调用方拼接。
+        """
         player_id = resolve_player_character_id(game_state, character_profiles)
         player_profile = character_profiles.get(player_id, {})
         existing_l1_count, existing_l2_count, existing_actor_count = _resolve_effective_roster_counts(
@@ -735,6 +256,15 @@ class ActorCreateAgent(BaseAgent):
         character_roster_tool_runtime: CharacterRosterToolRuntime | None = None,
         resolved_snapshots: dict[str, Any] | None = None,
     ) -> str:
+        """临场生成单个 ActorAgent 的指令构造路径。
+
+        与 ``build_instruction`` 的差异在于这是"场景 handoff 时补角色"
+        的通道：当玩家的下一步动作需要一个新面孔（守卫、向导、摊贩……）
+        即时上台，本方法拼装一份只允许产出**恰好一个**角色的 Prompt，
+        通过 ``immediate_scene_need``（destination/objective/reward_item/
+        player_intent）把当下的场景压力显式告诉 LLM，同时仍然允许它选择
+        actor / L2 / L1 三种档位，只不过默认应偏向可复用的 actor 模板。
+        """
         player_id = resolve_player_character_id(game_state, character_profiles)
         player_profile = character_profiles.get(player_id, {})
         existing_cast = [
@@ -819,6 +349,30 @@ class ActorCreateAgent(BaseAgent):
         max_total_characters: int = MAX_STORY_CHARACTERS,
         character_roster_snapshot: Mapping[str, Any] | None = None,
     ) -> dict[str, "CharacterProfile"]:
+        """把 LLM 返回的 characters 列表归一化为 CharacterProfile 字典。
+
+        每个候选角色遵循下列 7 步流程：
+
+        1. ``_build_character_id`` —— 由 raw_id / name / 现有 profile
+           冲突集合决定最终 id（保证 lowercase snake_case & 唯一）。
+        2. **跳过既有非本 agent 生成的角色** —— 若 ``character_id`` 已在
+           ``character_profiles`` 中，且其 ``profile_source`` 不是
+           ``"actor_create_agent"``，则本轮不覆盖它，直接 continue。
+        3. ``_build_layer_assignment_seed`` —— 汇总 story_role / persona /
+           planned_chapter 等信号，产出层级判定种子。
+        4. ``_resolve_story_agent_type`` —— 根据种子 + 章节规划得出
+           ``actor / L2 / L1`` 三档中的一档。
+        5. ``_respect_agent_layer_limits`` + ``_respect_player_bound_capacity``
+           —— 依次夹紧 L1/L2 上限、以及 player-bound 总容量。
+        6. ``_assign_chapter_ids`` —— outline 存在但角色未提供
+           ``planned_chapter_ids`` 时，从当前章节顺推补齐。
+        7. 按最终 agent_type 填充 ``l1_profile`` 或 ``l2_profile``，
+           并写入 ``profile_source="actor_create_agent"`` 作为持久化标记。
+
+        **注意：``"actor_create_agent"`` 字符串是持久化数据中的
+        profile_source 标记值，读写两处必须保持原样，任何字面改动都会
+        破坏后续 agent 判定"这条数据是否由我生成、可被覆盖"的语义。**
+        """
         player_id = resolve_player_character_id(game_state, character_profiles)
         player_profile = character_profiles.get(player_id, {})
         player_background = clean_text(player_profile.get("background", ""))
@@ -1030,6 +584,7 @@ class ActorCreateAgent(BaseAgent):
         max_total_characters: int = MAX_STORY_CHARACTERS,
         character_roster_snapshot: Mapping[str, Any] | None = None,
     ) -> "CharacterProfile | None":
+        # 单角色归一化：把 output["actor"] 包成 characters 列表复用主流程。
         if not output or not isinstance(output.get("actor"), Mapping):
             return None
 
@@ -1051,6 +606,7 @@ class ActorCreateAgent(BaseAgent):
         history: list[AgentMessage] | None = None,
         max_total_characters: int = MAX_STORY_CHARACTERS,
     ) -> dict[str, "CharacterProfile"]:
+        # 一站式：build_instruction → command → normalize_supporting_cast。
         resolved_snapshots: dict[str, Any] = {}
         instruction = self.build_instruction(
             game_state=game_state,
@@ -1086,6 +642,7 @@ class ActorCreateAgent(BaseAgent):
         history: list[AgentMessage] | None = None,
         max_total_characters: int = MAX_STORY_CHARACTERS,
     ) -> "CharacterProfile | None":
+        # 一站式：临场生成单个 ActorAgent 并归一化。
         resolved_snapshots: dict[str, Any] = {}
         instruction = self.build_contextual_actor_instruction(
             game_state=game_state,
@@ -1110,3 +667,6 @@ class ActorCreateAgent(BaseAgent):
             max_total_characters=max_total_characters,
             character_roster_snapshot=resolved_snapshots.get("character_roster_snapshot"),
         )
+
+
+__all__ = ["ActorCreateAgent", "MAX_L1_AGENTS", "MAX_L2_AGENTS", "MAX_STORY_CHARACTERS"]

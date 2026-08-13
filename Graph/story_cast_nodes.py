@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 from CharacterProfile import CharacterProfile, ensure_character_profile
 from GameState import GameState, create_character_runtime_state
 from StoryStateUtils import serialize_story_cast_member
-from actor_create_agent import ActorCreateAgent, MAX_STORY_CHARACTERS
+from Actor.ActorCreateAgent import ActorCreateAgent, MAX_STORY_CHARACTERS
 
 if TYPE_CHECKING:
     from Graph.nodes import GraphDependencies
