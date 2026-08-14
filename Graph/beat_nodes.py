@@ -10,7 +10,7 @@ from Graph.narration_nodes import (
     director_wrap_up_node,
     narration_subgraph_node,
 )
-from Graph.nodes import (
+from Graph.dialogue_nodes import (
     actor_node,
     cultivation_progress_node,
     scene_end_node,
