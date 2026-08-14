@@ -21,4 +21,11 @@
 - **现象**:`_export_runtime_snapshot_unlocked` 把 repo 直接 `json.dumps` → `TypeError: CharacterRepository is not JSON serializable`;`store_snapshot` 又用 `require_snapshot_value(..., dict)` 强校验。
 - **处理**:在 `web_session.py` 加 `_profiles_as_dict()` helper,导出前把 repo 解包为底层 dict。已修复,测试全绿。
 
+### Code Review 处理(阶段1)
+- **中等-双引用漂移**:`web_session.character_profiles` 生命周期内曾在裸 dict/repo 间交替。已在 `_reload_dependencies` 赋值后加 `assert isinstance(..., CharacterRepository)`,消除隐式时序依赖。已修。
+- **轻微-isinstance**:`_profiles_as_dict` 从 `getattr` 鸭子类型改为 `isinstance(profiles, CharacterRepository)`,意图更清晰。已修。
+- **轻微-`__contains__` 冗余**:删除手写版,由 MutableMapping 基类派生。已修。
+- **判断-bulk_update 保留(与 reviewer 建议相反)**:reviewer 建议删除无调用方的 `bulk_update`。我**保留**并注明"增量构建场景用",理由:它是 repo 的合法公共写方法,阶段2 拆 story_cast 时很可能用到,删了再加回来反而折腾。**待你定夺**:若你倾向严格 YAGNI,可删。
+
+
 

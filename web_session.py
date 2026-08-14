@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any, Callable
 
 from CharacterRosterTools import CharacterRosterToolRuntime
 from CharacterProfile import ensure_character_profile, ensure_character_profiles
+from CharacterRepository import CharacterRepository
 from Graph.builder import (
     initialize_story_session,
     prepare_chapter_turn,
@@ -59,8 +60,9 @@ def _json_clone(value: Any) -> Any:
 
 def _profiles_as_dict(profiles: Any) -> dict[str, Any]:
     """把 CharacterRepository 解包成底层 dict 供序列化;裸 dict 原样返回。"""
-    as_dict = getattr(profiles, "as_dict", None)
-    return as_dict() if callable(as_dict) else profiles
+    if isinstance(profiles, CharacterRepository):
+        return profiles.as_dict()
+    return profiles
 
 
 def _strip_trailing_sentence_marks(value: Any, fallback: str = "") -> str:
@@ -530,6 +532,8 @@ class WebGameSession:
             scene_config=self.scene_config,
         )
         self.character_profiles = self.deps.character_profiles
+        # 归一化后本会话内 profiles 恒为 repo,消除"裸 dict/repo 交替"的时序隐患。
+        assert isinstance(self.character_profiles, CharacterRepository)
         self.scene_config = self.deps.scene_config
         self._bind_dependencies()
 

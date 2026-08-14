@@ -37,9 +37,6 @@ class CharacterRepository(MutableMapping[str, "CharacterProfile"]):
     def __len__(self) -> int:
         return len(self._profiles)
 
-    def __contains__(self, actor_id: object) -> bool:
-        return actor_id in self._profiles
-
     # --- 具名写入口(推荐) ---
 
     def set_profile(self, actor_id: str, profile: "CharacterProfile") -> None:
@@ -53,7 +50,7 @@ class CharacterRepository(MutableMapping[str, "CharacterProfile"]):
         self._profiles[actor_id] = current  # type: ignore[assignment]
 
     def bulk_update(self, profiles: Mapping[str, "CharacterProfile"]) -> None:
-        """批量合并档案(story cast 构建等场景)。"""
+        """批量合并档案(story cast 增量构建等场景)。"""
         self._profiles.update(profiles)
 
     def replace_all(self, profiles: Mapping[str, "CharacterProfile"]) -> None:
