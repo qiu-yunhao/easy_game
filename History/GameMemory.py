@@ -17,6 +17,8 @@ class HistoryItem(TypedDict):
     narration_style_preset: NotRequired[str]
     message_kind: NotRequired[str]
     tool_name: NotRequired[str]
+    on_stage: NotRequired[list[str]]      # 该条目所属回合当时在台上的角色(逐条快照)
+    location_id: NotRequired[str]         # 该条目发生的地点(逐条快照)
 
 
 class ScoredHistoryItem(HistoryItem):
