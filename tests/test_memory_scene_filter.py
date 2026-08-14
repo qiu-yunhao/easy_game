@@ -59,3 +59,21 @@ class SceneFilterTests(unittest.TestCase):
             recent_rounds=10, granularity="on_stage",
         )
         self.assertEqual(kept, [])
+
+    def test_recent_rounds_zero_returns_all_present(self):
+        # recent_rounds<=0 表示不限制,返回全部在场条目(不切片)
+        history = [
+            _item(t, "A", on_stage=["A"], location_id="hall") for t in range(1, 4)
+        ]
+        kept = filter_history_by_presence(
+            history, actor_id="A", current_location_id="hall",
+            recent_rounds=0, granularity="on_stage",
+        )
+        self.assertEqual([it["turn"] for it in kept], [1, 2, 3])
+
+    def test_empty_history_returns_empty(self):
+        kept = filter_history_by_presence(
+            [], actor_id="A", current_location_id="hall",
+            recent_rounds=3, granularity="on_stage",
+        )
+        self.assertEqual(kept, [])
