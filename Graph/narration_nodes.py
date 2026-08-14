@@ -108,6 +108,9 @@ def _append_narration_event(
                 "content": normalized_content,
                 "narration_source": source,
                 "narration_style_preset": style_preset,
+                # 补记当前 scene 的在场快照,供后续逐条在场过滤精确使用
+                "on_stage": list(state["scene"].get("on_stage", [])),
+                "location_id": state["scene"].get("location_id", ""),
             },
         ],
         "runtime": {
