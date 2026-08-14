@@ -57,6 +57,12 @@ def _json_clone(value: Any) -> Any:
     return json.loads(json.dumps(value, ensure_ascii=False))
 
 
+def _profiles_as_dict(profiles: Any) -> dict[str, Any]:
+    """把 CharacterRepository 解包成底层 dict 供序列化;裸 dict 原样返回。"""
+    as_dict = getattr(profiles, "as_dict", None)
+    return as_dict() if callable(as_dict) else profiles
+
+
 def _strip_trailing_sentence_marks(value: Any, fallback: str = "") -> str:
     text = str(value or "").strip() or fallback
     while text and text[-1] in TRAILING_SENTENCE_MARKS:
@@ -319,7 +325,7 @@ class WebGameSession:
                 "last_handoff_reason": self.last_handoff_reason,
             },
             "state": _json_clone(self.state),
-            "character_profiles": _json_clone(self.character_profiles),
+            "character_profiles": _json_clone(_profiles_as_dict(self.character_profiles)),
             "scene_config": _json_clone(self.scene_config),
         }
 

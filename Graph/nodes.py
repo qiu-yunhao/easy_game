@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Callable
 from Actor import ActorAgent, apply_resolved_act
 from Actor.ActorFormatter import compose_resolved_act_content
 from CharacterProfile import CharacterProfile
+from CharacterRepository import CharacterRepository
 from ComponentFactory import ComponentFactory
 from Graph.actor_paths import resolve_npc_turn_state, resolve_player_turn_state
 from Graph.beat_subgraph import (
@@ -76,7 +77,7 @@ if TYPE_CHECKING:
 @dataclass(slots=True)
 class GraphDependencies:
     scene_config: SceneConfig
-    character_profiles: dict[str, CharacterProfile]
+    character_profiles: CharacterRepository | dict[str, CharacterProfile]
     playwright_agent: PlaywrightAgent | None = None
     actor_create_agent: ActorCreateAgent | None = None
     director_agent: DirectorAgent | None = None
@@ -99,6 +100,11 @@ class GraphDependencies:
     actor_create_signature: str = ""
     beat_execution_subgraph: Callable[[GameState], GameState] | None = None
     hook_registry: HookRegistry = field(default_factory=HookRegistry)
+
+    def __post_init__(self) -> None:
+        # 统一把裸 dict 归一化为 CharacterRepository,保证单一写入口。
+        if not isinstance(self.character_profiles, CharacterRepository):
+            self.character_profiles = CharacterRepository(self.character_profiles)
 
 
 CULTIVATION_SIGNAL_MARKERS = (
@@ -292,10 +298,9 @@ def cultivation_progress_node(state: GameState, deps: GraphDependencies) -> Game
     if breakthrough_realm is not None:
         current_realm = deps.character_profiles.get(player_actor, {}).get("realm", "")
         if not has_reached_realm(current_realm, breakthrough_realm):
-            deps.character_profiles[player_actor] = {
-                **deps.character_profiles.get(player_actor, {}),
-                "realm": breakthrough_realm,
-            }
+            deps.character_profiles.update_field(
+                player_actor, "realm", breakthrough_realm
+            )
             chapter_id = _clean_text(state["plot"].get("chapter_id", ""))
             plot_flags = dict(state["plot"].get("plot_flags", {}))
             if chapter_id:

@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, TypedDict
 
 from CharacterProfile import CharacterProfile, ensure_character_profile
+from CharacterRepository import CharacterRepository
 from GameState import GameState, SceneCandidate
 from ScenePlan import ScenePlan
 from StoryStateUtils import clean_text as _clean_text
@@ -323,7 +324,7 @@ def _resolve_reward_item_from_turn(state: GameState) -> str:
 
 
 def _grant_item_to_backpack(
-    character_profiles: dict[str, CharacterProfile],
+    character_profiles: CharacterRepository,
     *,
     player_id: str,
     item_name: str,
@@ -337,7 +338,7 @@ def _grant_item_to_backpack(
     backpack = list(normalized_profile.get("backpack", []))
     for item in backpack:
         if _clean_text(item.get("name", "")) == item_name or _clean_text(item.get("id", "")) == item_name:
-            character_profiles[player_id] = normalized_profile
+            character_profiles.set_profile(player_id, normalized_profile)
             return
 
     backpack.append(
@@ -348,12 +349,12 @@ def _grant_item_to_backpack(
         }
     )
     normalized_profile["backpack"] = backpack
-    character_profiles[player_id] = normalized_profile
+    character_profiles.set_profile(player_id, normalized_profile)
 
 
 def apply_contextual_scene_progression(
     state: GameState,
-    character_profiles: dict[str, CharacterProfile],
+    character_profiles: CharacterRepository,
 ) -> GameState:
     resolved_act = state["runtime"].get("resolved_act")
     if resolved_act is None:

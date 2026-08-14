@@ -86,8 +86,9 @@ def _merge_story_cast(
             include_backpack="backpack" in profile or "backpack" in existing_profile,
         )
 
-    deps.character_profiles.clear()
-    deps.character_profiles.update(dict(list(merged_profiles.items())[:MAX_STORY_CHARACTERS]))
+    deps.character_profiles.replace_all(
+        dict(list(merged_profiles.items())[:MAX_STORY_CHARACTERS])
+    )
 
     next_characters = dict(state["characters"])
     for character_id, profile in deps.character_profiles.items():
