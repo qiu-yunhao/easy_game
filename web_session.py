@@ -491,6 +491,9 @@ class WebGameSession:
                     "tool_name": str(result.get("tool_name", "") or "").strip(),
                     "tool_payload": tool_payload,
                     "message_kind": "system",
+                    # 补记当前 scene 的在场快照,供后续逐条在场过滤精确使用
+                    "on_stage": list(self.state["scene"].get("on_stage", [])),
+                    "location_id": self.state["scene"].get("location_id", ""),
                 },
             ],
             "runtime": {

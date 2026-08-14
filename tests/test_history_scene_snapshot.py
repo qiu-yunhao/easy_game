@@ -1,6 +1,20 @@
 from __future__ import annotations
 
+import sys
+import types
 import unittest
+
+# web_session 依赖 openai;在无 SDK 的测试环境下打桩,避免导入失败。
+_openai_stub = types.ModuleType("openai")
+
+
+class _OpenAI:  # pragma: no cover - 本地测试的导入垫片
+    def __init__(self, *args, **kwargs) -> None:
+        del args, kwargs
+
+
+_openai_stub.OpenAI = _OpenAI
+sys.modules.setdefault("openai", _openai_stub)
 
 from Actor.ActorRuntime import apply_resolved_act
 from CharacterProfile import ensure_character_profile
@@ -57,5 +71,24 @@ class HistorySceneSnapshotTests(unittest.TestCase):
         next_state = apply_resolved_act(state, character_profiles=profiles)
 
         last = next_state["history"][-1]
+        self.assertEqual(last["on_stage"], ["A", "B"])
+        self.assertEqual(last["location_id"], "hall")
+
+    def test_append_tool_message_records_on_stage_and_location(self):
+        # 第四处写点:web_session 工具事件(actor=None 的系统事件)也须补记在场快照,
+        # 否则严格 on_stage 过滤下这条工具事件记忆将永久不可见,与其余三处写点不一致。
+        from web_session import SessionConfig, WebGameSession
+
+        session = WebGameSession(SessionConfig(mode="heuristic"))
+        session.state["scene"]["on_stage"] = ["A", "B"]
+        session.state["scene"]["location_id"] = "hall"
+
+        session._append_tool_message_unlocked(
+            raw_input="查看背包",
+            parsed_act={"actor": "player", "mode": "tool"},
+            result={"text": "背包里有一把铁剑。", "tool_name": "inventory", "payload": {}},
+        )
+
+        last = session.state["history"][-1]
         self.assertEqual(last["on_stage"], ["A", "B"])
         self.assertEqual(last["location_id"], "hall")
