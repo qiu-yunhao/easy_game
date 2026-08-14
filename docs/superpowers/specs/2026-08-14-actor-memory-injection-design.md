@@ -114,21 +114,23 @@ class ActorMemoryContext:
 ## 4. 三层细节
 
 ### 4.1 短期记忆 —— 在场过滤(本方案核心新增)
-规则(默认严格粒度,可调):
+> **决策已定(2026-08-14)**:A = 补记逐条快照;D = 严格 on_stage 为默认、location 作可配置放宽项。
+
+规则:
 
 - 遍历 `state["history"]`,只保留满足以下条件的条目,再取最近 3 轮:
-  - **严格粒度(默认)**:该条目所属回合,`actor_id ∈ scene["on_stage"]`(角色当时在台上)。
-  - **地点粒度(可选备选)**:该条目发生地点 `location_id` == 角色当前所在地点。
-- 判定"某回合角色是否在场"需要历史里能追溯当时的 on_stage。**已核对源码**:
+  - **严格粒度(默认,决策 D)**:该条目所属回合,`actor_id ∈ item["on_stage"]`(角色当时在台上)。
+  - **地点粒度(可配置放宽)**:该条目发生地点 `item["location_id"]` == 角色当前所在地点。
+  - 过滤函数带 `granularity` 参数,默认 `"on_stage"`,需要"同地点旁观者也可见"时切 `"location"`。
+- 判定"某回合角色是否在场"需要逐条能追溯当时的 on_stage。**已核对源码**:
   `HistoryItem`(`History/GameMemory.py:6`)**只有** `turn/actor/mode/content` 及若干
   文本/工具字段,**不带** `on_stage` / `location_id`。逐条明细无法直接追溯当时在场者;
   现有的 `on_stage` 快照只存在于 `SchedulerMemory.on_stage`(视角级)与压缩块
   (`HistoryCompression.py:26/31` 的 `location_id`/`on_stage`,块级),粒度都比逐条粗。
-  - 备选 1(**补记**):写 history 时给每条 `HistoryItem` 增补 `on_stage`/`location_id`
-    快照(存侧小改),之后可精确逐条过滤。**推荐**,一劳永逸。
-  - 备选 2(**兜底**):不改存侧,短期层先用全局最近 3 轮兜底,后续再收窄。改动最小,
-    但"不在场则无记忆"约束此时是**未完全满足**的。
-  - review 决策点 A:选"补记"(前置一小步存侧改动)还是"先全局兜底"(约束延后满足)。
+- **决策 A(已定)**:写 history 时给每条 `HistoryItem` 增补 `on_stage`/`location_id`
+  快照(存侧小改),之后精确逐条过滤。
+  - **旧数据回填:不做**。当前环境没有历史数据,无需回填;缺该字段的条目(理论上不存在)
+    按"缺省即不可见"处理即可。
 
 ### 4.2 长期记忆 —— 复用为主 + N 轮下限兜底
 - 数据源:`state["characters"][actor_id]["memory"]` 里的 `consolidated_memory[-k]` +
@@ -189,8 +191,8 @@ actor_agent.perform_turn(ctx)                              # agent 只拿收窄�
 ---
 
 ## 7. 待 review 决策点汇总
-- **A(短期过滤前置依赖)**:已核实 `HistoryItem` **不带** on_stage/location 快照(只有视角级/块级快照)。选"补记逐条快照"(推荐,精确)还是"先全局最近3轮兜底"(改动最小,约束延后)。
-- **B(长期节奏)**:N 轮下限取值,以及是否保留该兜底。
-- **C(检索 query)**:第三层检索用什么查询文本(本轮可暂缓)。
-- **D(在场粒度)**:默认严格 on_stage,是否改用/并存 location 粒度。
-- **E(推广范围)**:本轮是否只做 Actor 一条路径,Director/Narrator/Scheduler 留后。
+- **A(短期过滤前置依赖)✅ 已定**:补记逐条 `on_stage`/`location_id` 快照(存侧小改);不做旧数据回填(当前环境无历史数据)。
+- **B(长期节奏)⏳ 待定**:N 轮下限取值,以及是否保留该兜底。
+- **C(检索 query)⏳ 待定**:第三层检索用什么查询文本(本轮可暂缓)。
+- **D(在场粒度)✅ 已定**:严格 `on_stage` 为默认,`location` 作可配置放宽项(`granularity` 参数)。
+- **E(推广范围)⏳ 待定**:本轮是否只做 Actor 一条路径,Director/Narrator/Scheduler 留后。
