@@ -174,6 +174,9 @@ def apply_group_results(
                     "spoken_text": "",
                     "nonverbal_action": "",
                     "message_kind": "system",
+                    # 补记当前 scene 的在场快照,供后续逐条在场过滤精确使用
+                    "on_stage": list(current["scene"].get("on_stage", [])),
+                    "location_id": current["scene"].get("location_id", ""),
                 },
             ],
             "runtime": {**current["runtime"], "turn_index": next_turn},

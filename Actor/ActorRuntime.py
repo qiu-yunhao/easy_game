@@ -619,6 +619,9 @@ def apply_resolved_act(
         "content": resolved_act["content"],
         "spoken_text": resolved_act.get("spoken_text", ""),
         "nonverbal_action": resolved_act.get("nonverbal_action", ""),
+        # 补记当前 scene 的在场快照,供后续逐条在场过滤精确使用
+        "on_stage": list(state["scene"].get("on_stage", [])),
+        "location_id": state["scene"].get("location_id", ""),
     }
 
     characters = dict(state["characters"])
