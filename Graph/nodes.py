@@ -24,20 +24,25 @@ from Graph.dependencies import GraphDependencies
 # 对话/beat 节点已搬到 Graph.dialogue_nodes(继续打破 nodes<->beat_nodes 循环)。
 # 此处 re-export 以保持既有 `from Graph.nodes import actor_node` 等导入路径兼容。
 from Graph.dialogue_nodes import (
-    CULTIVATION_SIGNAL_MARKERS,
     actor_node,
     beat_resolution_node,
     contextual_progression_node,
-    cultivation_progress_node,
     director_node,
     history_commit_node,
     refresh_history_node,
     scene_end_node,
     scheduler_node,
-    _build_cultivation_result_text,
-    _looks_like_cultivation_turn,
     _polish_nonverbal_action,
     _resolve_agent_for_actor,
+)
+
+# 修炼节点逻辑已抽到 Cultivation 领域插件。
+# 此处 re-export 以保持既有 `from Graph.nodes import cultivation_progress_node` 等兼容。
+from Cultivation import (
+    CULTIVATION_SIGNAL_MARKERS,
+    cultivation_progress_node,
+    _build_cultivation_result_text,
+    _looks_like_cultivation_turn,
     _sync_plot_cultivation_state,
 )
 
