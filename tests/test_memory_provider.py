@@ -92,6 +92,31 @@ class DefaultActorMemoryProviderTests(unittest.TestCase):
         self.assertEqual(len(ctx.long_term.pinned), 1)
         self.assertEqual(ctx.long_term.pinned[0]["event_summary"], "钉住")
 
+    def test_build_long_term_lists_decoupled_from_state(self):
+        # 造 state:pinned_long_term_memory 预置一个元素。
+        state, profiles = _build_state_with_history()
+        original = {
+            "turn_recorded": 1, "event_summary": "钉住", "subjective_interpretation": "",
+            "belief_formed": "", "priority": "high", "tags": [],
+            "pin_candidate": True, "pin_reason": "", "linked_characters": [],
+        }
+        state["characters"]["A"]["memory"]["pinned_long_term_memory"] = [original]
+
+        provider = DefaultActorMemoryProvider(character_profiles=profiles)
+        ctx = provider.build("A", state)
+
+        # LongTermView 是 frozen dataclass,但其内部 list 本身可变,append 允许。
+        # 向返回的 DTO 列表增元素,不应回写 state 内部列表(build 时 list(...) 浅拷贝解耦)。
+        injected = {"turn_recorded": 99, "event_summary": "注入", "subjective_interpretation": "",
+                    "belief_formed": "", "priority": "low", "tags": [],
+                    "pin_candidate": False, "pin_reason": "", "linked_characters": []}
+        ctx.long_term.pinned.append(injected)
+
+        state_pinned = state["characters"]["A"]["memory"]["pinned_long_term_memory"]
+        # state 内部列表长度不变、不含新元素——证明顶层增删已隔离。
+        self.assertEqual(len(state_pinned), 1)
+        self.assertNotIn(injected, state_pinned)
+
     def test_build_retrieved_is_empty_placeholder(self):
         state, profiles = _build_state_with_history()
         provider = DefaultActorMemoryProvider(character_profiles=profiles)
