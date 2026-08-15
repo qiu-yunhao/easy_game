@@ -126,5 +126,15 @@ class AdvanceOnEventTest(unittest.TestCase):
         self.assertIs(seen["cb"], cb)
 
 
+class AdvanceNextActNoneTest(unittest.TestCase):
+    @patch("Graph.conversation_controller.prepare_chapter_turn", lambda s, d: s)
+    def test_advance_returns_when_next_act_none(self):
+        # scene 未结束、prepare 也补不出 next_act(patch 原样返回)→ 早返回「无新动作」。
+        controller = ConversationController(deps=object())
+        state = _base_state(None)  # next_act=None 且 scene 未结束
+        result, reason = controller.advance(state, stop_when=never_stop)
+        self.assertIn("没有新的自动后续动作", reason)
+
+
 if __name__ == "__main__":
     unittest.main()
