@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
-from CharacterProfile import CharacterProfile
+from CharacterProfile import CharacterProfile, ensure_character_profile
 from GameState import GameState
 from Memory.context import ActorMemoryContext, LongTermView
 from Memory.scene_filter import PresenceGranularity, filter_history_by_presence
@@ -24,8 +24,9 @@ class DefaultActorMemoryProvider:
         self._granularity = granularity
 
     def build(self, actor_id: str, state: GameState) -> ActorMemoryContext:
-        # 人设:命中则复用现有 CharacterProfile,未命中给空 dict 兜底。
-        persona: CharacterProfile = self._character_profiles.get(actor_id, {})  # type: ignore[assignment]
+        # 人设:命中则复用现有 CharacterProfile;未命中给合法空壳兜底,
+        # 保住下游 .get("memory_profile") / 播种 / agent_contract 字段访问。
+        persona: CharacterProfile = self._character_profiles.get(actor_id) or ensure_character_profile(None)
 
         # 短期:按「角色当时是否在场」过滤 history,再取最近数轮。
         short_term = filter_history_by_presence(
