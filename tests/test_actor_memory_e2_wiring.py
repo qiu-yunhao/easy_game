@@ -48,5 +48,27 @@ class BootstrapProviderTest(unittest.TestCase):
         self.assertIsInstance(deps.actor_memory_provider, ActorMemoryProvider)
 
 
+class PresenceFilterIntegrationTest(unittest.TestCase):
+    def test_recent_history_excludes_offstage_turns(self):
+        # 角色 npc_a 在 turn 0 在场、turn 1 下场、turn 2 再上场。
+        history = [
+            {"turn": 0, "actor": "player", "mode": "say", "content": "hi",
+             "on_stage": ["player", "npc_a"], "location_id": "room"},
+            {"turn": 1, "actor": "npc_b", "mode": "say", "content": "secret while a is gone",
+             "on_stage": ["player", "npc_b"], "location_id": "room"},
+            {"turn": 2, "actor": "player", "mode": "say", "content": "welcome back",
+             "on_stage": ["player", "npc_a"], "location_id": "room"},
+        ]
+        state = _state_with_history(history)
+        state["scene"] = {"location_id": "room", "on_stage": ["player", "npc_a"]}
+        provider = DefaultActorMemoryProvider(character_profiles={}, recent_rounds=5, granularity="on_stage")
+        ctx = provider.build("npc_a", state)
+        contents = [item.get("content") for item in ctx.short_term]
+        # npc_a 下场期间(turn 1)的对话不可见。
+        self.assertNotIn("secret while a is gone", contents)
+        self.assertIn("hi", contents)
+        self.assertIn("welcome back", contents)
+
+
 if __name__ == "__main__":
     unittest.main()
