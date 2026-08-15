@@ -29,6 +29,7 @@ from Actor import apply_resolved_act
 from Graph.contextual_scene_handoffs import apply_contextual_scene_progression
 from Graph.nodes import GraphDependencies
 from History import HistoryManager
+from Memory.default_provider import DefaultActorMemoryProvider
 from Narrator.NarrationPresets import (
     DEFAULT_NARRATION_STYLE_PRESET,
     resolve_narration_style_preset,
@@ -378,6 +379,11 @@ def build_runtime_dependencies(
     deps = GraphDependencies(
         scene_config=resolved_scene_config,
         character_profiles=character_profiles,
+        actor_memory_provider=DefaultActorMemoryProvider(
+            character_profiles=character_profiles,
+            recent_rounds=3,
+            granularity="on_stage",
+        ),
         history_manager=HistoryManager(compression_trigger_size=1),
         gameplay_tuning=GameplayTuning(narration=NarrationTuning(style_preset=narration_style_preset)),
         component_factory=component_factory,
