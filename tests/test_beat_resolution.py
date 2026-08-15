@@ -21,6 +21,7 @@ from GameplayTuning import GameplayTuning, NarrationTuning
 from Graph.builder import resolve_story_turn
 from Graph.nodes import GraphDependencies, actor_node, cultivation_progress_node, director_node, scheduler_node
 from History.GameMemory import empty_memory_state
+from Memory.default_provider import DefaultActorMemoryProvider
 from PlayerControl import BufferedPlayerInterface
 from ResolvedActUtils import build_resolved_act_payload
 from ScenePlan import empty_scene_plan
@@ -224,6 +225,7 @@ class BeatResolutionTests(unittest.TestCase):
                 "default_on_stage": ["npc_a"],
             },
             character_profiles=profiles,
+            actor_memory_provider=DefaultActorMemoryProvider(character_profiles=profiles),
             actor_agent=FakeTierActor("default"),
             l2_actor_agent=FakeTierActor("l2"),
             l1_actor_agent=FakeTierActor("l1"),
@@ -263,6 +265,7 @@ class BeatResolutionTests(unittest.TestCase):
                 "default_on_stage": ["npc_a"],
             },
             character_profiles=profiles,
+            actor_memory_provider=DefaultActorMemoryProvider(character_profiles=profiles),
             actor_agent=FakeTierActor("default"),
             l2_actor_agent=FakeTierActor("l2"),
             l1_actor_agent=FakeTierActor("l1"),
@@ -294,6 +297,7 @@ class BeatResolutionTests(unittest.TestCase):
                 "default_on_stage": ["npc_a"],
             },
             character_profiles=profiles,
+            actor_memory_provider=DefaultActorMemoryProvider(character_profiles=profiles),
             actor_agent=FakeTierActor("default"),
             l2_actor_agent=FakeTierActor("l2"),
             l1_actor_agent=FakeTierActor("l1"),
@@ -320,6 +324,7 @@ class BeatResolutionTests(unittest.TestCase):
                 "default_on_stage": ["player", "npc_a"],
             },
             character_profiles=profiles,
+            actor_memory_provider=DefaultActorMemoryProvider(character_profiles=profiles),
             director_agent=FakeDirector(
                 {
                     "beat": "mysterious arrival",
@@ -382,6 +387,7 @@ class BeatResolutionTests(unittest.TestCase):
                 "default_on_stage": ["npc_a", "npc_b"],
             },
             character_profiles=profiles,
+            actor_memory_provider=DefaultActorMemoryProvider(character_profiles=profiles),
             director_agent=FakeDirector(
                 {
                     "beat": "exchange",
@@ -437,6 +443,7 @@ class BeatResolutionTests(unittest.TestCase):
                 "default_on_stage": ["player", "npc_a", "npc_b"],
             },
             character_profiles=profiles,
+            actor_memory_provider=DefaultActorMemoryProvider(character_profiles=profiles),
             director_agent=FakeDirector(
                 {
                     "beat": "handoff",
@@ -505,6 +512,7 @@ class BeatResolutionTests(unittest.TestCase):
                 "default_on_stage": ["npc_a", "npc_b", "npc_c"],
             },
             character_profiles=profiles,
+            actor_memory_provider=DefaultActorMemoryProvider(character_profiles=profiles),
             director_agent=FakeDirector(
                 {
                     "beat": "triangle",
@@ -560,6 +568,7 @@ class BeatResolutionTests(unittest.TestCase):
                 "default_on_stage": ["npc_a", "npc_b"],
             },
             character_profiles=profiles,
+            actor_memory_provider=DefaultActorMemoryProvider(character_profiles=profiles),
             director_agent=FakeDirector(
                 {
                     "beat": "exchange",
@@ -631,6 +640,7 @@ class BeatResolutionTests(unittest.TestCase):
                 "default_on_stage": ["player"],
             },
             character_profiles=profiles,
+            actor_memory_provider=DefaultActorMemoryProvider(character_profiles=profiles),
             component_factory=ComponentFactory(),
         )
         register_default_hooks(deps)
@@ -673,6 +683,7 @@ class ParallelGroupBeatTest(unittest.TestCase):
                 "default_on_stage": ["npc_a", "npc_b"],
             },
             character_profiles=profiles,
+            actor_memory_provider=DefaultActorMemoryProvider(character_profiles=profiles),
             director_agent=FakeDirector(
                 {
                     "beat": "parallel",
@@ -733,6 +744,7 @@ class ParallelGroupBeatTest(unittest.TestCase):
                 "default_on_stage": ["npc_a", "npc_b"],
             },
             character_profiles=profiles,
+            actor_memory_provider=DefaultActorMemoryProvider(character_profiles=profiles),
             director_agent=FakeDirector(
                 {
                     "beat": "parallel",

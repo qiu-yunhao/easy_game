@@ -25,6 +25,7 @@ if TYPE_CHECKING:
     from History.HistorySummarizerAgent import HistorySummarizerAgent
     from PlayerControl.PlayerIntentPlannerAgent import PlayerIntentPlannerAgent
     from PlayerControl.PlayerCommandTools import PlayerCommandToolRuntime
+    from Memory.provider import ActorMemoryProvider
 
 
 @dataclass(slots=True)
@@ -52,6 +53,8 @@ class GraphDependencies:
     agent_first: bool = False
     actor_create_signature: str = ""
     beat_execution_subgraph: Callable[[GameState], GameState] | None = None
+    # 只读记忆工厂:Actor 读路径由它 build(actor_id, state) 出 memory_ctx。
+    actor_memory_provider: "ActorMemoryProvider | None" = None
     hook_registry: HookRegistry = field(default_factory=HookRegistry)
 
     def __post_init__(self) -> None:

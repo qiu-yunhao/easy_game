@@ -103,7 +103,7 @@ def beat_resolution_node(
             current,
             group=group,
             resolve_agent=lambda actor_id: _resolve_agent_for_actor(deps, actor_id),
-            character_profiles=deps.character_profiles,
+            provider=deps.actor_memory_provider,
         )
         applied = apply_group_results(
             current,

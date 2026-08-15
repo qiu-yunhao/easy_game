@@ -55,7 +55,7 @@ def _perform_with_retry(
     group_start_state: dict[str, Any],
     actor_id: str,
     resolve_agent: Callable[[str], Any],
-    character_profiles: dict[str, Any],
+    provider: Any,
     max_retries: int,
 ) -> dict[str, Any]:
     # Each actor reads the group-start history (no intra-group pre-reading).
@@ -69,11 +69,13 @@ def _perform_with_retry(
             },
         },
     }
+    # 每个 actor 各自基于其 actor_state build 记忆上下文(与串行路径一致)。
+    memory_ctx = provider.build(actor_id, actor_state)
     last_error: Exception | None = None
     for _attempt in range(max_retries + 1):
         try:
             agent = resolve_agent(actor_id)
-            return agent.perform_turn(state=actor_state, character_profiles=character_profiles)
+            return agent.perform_turn(state=actor_state, memory_ctx=memory_ctx)
         except _PROGRAMMING_ERRORS:
             # A code bug, not a transient generation failure — surface it.
             logger.exception("actor %s raised a programming error; not retrying", actor_id)
@@ -91,7 +93,7 @@ def run_actor_group(
     *,
     group: list[str],
     resolve_agent: Callable[[str], Any],
-    character_profiles: dict[str, Any],
+    provider: Any,
     max_retries: int = 3,
 ) -> tuple[list[tuple[str, dict[str, Any]]], list[tuple[str, str]]]:
     if not group:
@@ -107,7 +109,7 @@ def run_actor_group(
                 group_start_state,
                 actor_id,
                 resolve_agent,
-                character_profiles,
+                provider,
                 max_retries,
             ): actor_id
             for actor_id in group

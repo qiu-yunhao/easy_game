@@ -70,9 +70,13 @@ def resolve_npc_turn_state(
     polish_nonverbal_action: Callable[[GameState, "GraphDependencies", dict[str, object]], dict[str, object]],
 ) -> GameState:
     if actor_agent is not None:
+        # 从计划的 next_act 取 actor_id,由记忆工厂 build 出只读记忆上下文。
+        planned_act = state["runtime"].get("next_act") or {}
+        actor_id = str(planned_act.get("actor", "") or "").strip()
+        memory_ctx = deps.actor_memory_provider.build(actor_id, state)
         resolved_act = actor_agent.perform_turn(
             state=state,
-            character_profiles=deps.character_profiles,
+            memory_ctx=memory_ctx,
         )
     else:
         if deps.agent_first:

@@ -21,6 +21,7 @@ from GameState import (
     create_initial_game_state,
     create_player_state,
 )
+from Memory.default_provider import DefaultActorMemoryProvider
 from History.GameMemory import empty_memory_state
 from ResolvedActUtils import build_resolved_act_payload
 from ScenePlan import empty_scene_plan
@@ -83,8 +84,8 @@ class FakeActorAgent:
         self.fail_times = fail_times
         self.label = label
 
-    def perform_turn(self, state, character_profiles):
-        del character_profiles
+    def perform_turn(self, state, memory_ctx):
+        del memory_ctx
         self.calls += 1
         if self.calls <= self.fail_times:
             raise RuntimeError("boom")
@@ -97,6 +98,8 @@ def _make_state(history_len=3):
         "runtime": {"next_act": None},
         "history": [{"turn": i} for i in range(history_len)],
         "characters": {},
+        # 记忆工厂 build 会读 scene.location_id,补上最小场景快照。
+        "scene": {"location_id": "room"},
     }
 
 
@@ -144,7 +147,7 @@ class RunActorGroupTest(unittest.TestCase):
             state,
             group=["a", "b", "c"],
             resolve_agent=lambda aid: agents[aid],
-            character_profiles={},
+            provider=DefaultActorMemoryProvider(character_profiles={}),
             max_retries=3,
         )
         self.assertEqual(failures, [])
@@ -157,7 +160,7 @@ class RunActorGroupTest(unittest.TestCase):
         successes, _failures = run_actor_group(
             state, group=["a", "b", "c"],
             resolve_agent=lambda aid: agents[aid],
-            character_profiles={}, max_retries=3,
+            provider=DefaultActorMemoryProvider(character_profiles={}), max_retries=3,
         )
         self.assertEqual([aid for aid, _ in successes], ["a", "b", "c"])
 
@@ -167,7 +170,7 @@ class RunActorGroupTest(unittest.TestCase):
         successes, failures = run_actor_group(
             state, group=["a"],
             resolve_agent=lambda aid: agents[aid],
-            character_profiles={}, max_retries=3,
+            provider=DefaultActorMemoryProvider(character_profiles={}), max_retries=3,
         )
         self.assertEqual(len(successes), 1)
         self.assertEqual(failures, [])
@@ -179,7 +182,7 @@ class RunActorGroupTest(unittest.TestCase):
         successes, failures = run_actor_group(
             state, group=["a", "b"],
             resolve_agent=lambda aid: agents[aid],
-            character_profiles={}, max_retries=3,
+            provider=DefaultActorMemoryProvider(character_profiles={}), max_retries=3,
         )
         self.assertEqual([aid for aid, _ in successes], ["b"])
         self.assertEqual([aid for aid, _ in failures], ["a"])
@@ -190,8 +193,8 @@ class RunActorGroupTest(unittest.TestCase):
             def __init__(self):
                 self.calls = 0
 
-            def perform_turn(self, state, character_profiles):
-                del state, character_profiles
+            def perform_turn(self, state, memory_ctx):
+                del state, memory_ctx
                 self.calls += 1
                 raise AttributeError("typo'd attribute access")
 
@@ -201,7 +204,7 @@ class RunActorGroupTest(unittest.TestCase):
             run_actor_group(
                 state, group=["a"],
                 resolve_agent=lambda aid: agent,
-                character_profiles={}, max_retries=3,
+                provider=DefaultActorMemoryProvider(character_profiles={}), max_retries=3,
             )
         # Surfaced immediately: no retry loop, not downgraded to a failure entry.
         self.assertEqual(agent.calls, 1)
