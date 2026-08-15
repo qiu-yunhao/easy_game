@@ -4,8 +4,8 @@ from typing import Any
 
 from Actor.ActorFormatter import build_l1_actor_instruction, normalize_resolved_act
 from BaseAgent import BaseAgent
-from CharacterProfile import CharacterProfile
 from GameState import GameState, ResolvedAct
+from Memory.context import ActorMemoryContext
 
 from Actor.ActorSchema import ACTOR_TURN_RESPONSE_SCHEMA
 
@@ -35,14 +35,14 @@ class L1ActorAgent(BaseAgent):
     def perform_turn(
         self,
         state: GameState,
-        character_profiles: dict[str, CharacterProfile],
+        memory_ctx: ActorMemoryContext,
     ) -> ResolvedAct:
         planned_act = state["runtime"].get("next_act")
         return normalize_resolved_act(
             raw_result=self.command(
                 instruction=build_l1_actor_instruction(
                     state=state,
-                    character_profiles=character_profiles,
+                    memory_ctx=memory_ctx,
                 ),
                 response_format=ACTOR_TURN_RESPONSE_SCHEMA,
             ),

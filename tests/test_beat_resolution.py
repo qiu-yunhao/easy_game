@@ -37,8 +37,8 @@ class FakeDirector:
 
 
 class FakeActor:
-    def perform_turn(self, state, character_profiles):
-        del character_profiles
+    def perform_turn(self, state, memory_ctx):
+        del memory_ctx
         planned = state["runtime"].get("next_act") or {}
         actor = planned.get("actor")
         mode = planned.get("mode", "speak")
@@ -56,8 +56,8 @@ class FakeTierActor:
     def __init__(self, label: str) -> None:
         self.label = label
 
-    def perform_turn(self, state, character_profiles):
-        del character_profiles
+    def perform_turn(self, state, memory_ctx):
+        del memory_ctx
         planned = state["runtime"].get("next_act") or {}
         actor = planned.get("actor")
         return build_resolved_act_payload(
@@ -648,8 +648,8 @@ class ParallelGroupBeatTest(unittest.TestCase):
         seen_history_lens: dict[str, int] = {}
 
         class RecordingActor:
-            def perform_turn(self, state, character_profiles):
-                del character_profiles
+            def perform_turn(self, state, memory_ctx):
+                del memory_ctx
                 planned = state["runtime"].get("next_act") or {}
                 actor = planned.get("actor")
                 seen_history_lens[actor] = len(state["history"])

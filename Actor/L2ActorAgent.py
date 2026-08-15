@@ -4,8 +4,8 @@ from typing import Any
 
 from Actor.ActorFormatter import build_l2_actor_instruction, normalize_resolved_act
 from BaseAgent import BaseAgent
-from CharacterProfile import CharacterProfile
 from GameState import GameState, ResolvedAct
+from Memory.context import ActorMemoryContext
 from SupportingSceneIntentPolicy import SupportingSceneIntentPolicy
 
 from Actor.ActorSchema import ACTOR_TURN_RESPONSE_SCHEMA
@@ -44,11 +44,10 @@ class L2ActorAgent(BaseAgent):
     def perform_turn(
         self,
         state: GameState,
-        character_profiles: dict[str, CharacterProfile],
+        memory_ctx: ActorMemoryContext,
     ) -> ResolvedAct:
         planned_act = state["runtime"].get("next_act") or {}
-        actor_id = str(planned_act.get("actor", "") or "").strip()
-        actor_profile = character_profiles.get(actor_id, {})
+        actor_profile = memory_ctx.persona
         policy_decision = self.supporting_scene_intent_policy.decide(
             actor_profile=actor_profile,
             scene_need_detected=True,
@@ -60,7 +59,7 @@ class L2ActorAgent(BaseAgent):
             raw_result=self.command(
                 instruction=build_l2_actor_instruction(
                     state=state,
-                    character_profiles=character_profiles,
+                    memory_ctx=memory_ctx,
                     policy_decision=policy_decision,
                 ),
                 response_format=ACTOR_TURN_RESPONSE_SCHEMA,
