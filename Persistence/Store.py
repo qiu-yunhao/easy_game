@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from sqlalchemy import create_engine, select
+from sqlalchemy import select
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
+
+from db import Database, DatabaseConfig
 
 from Persistence.Models import (
     Base,
@@ -54,9 +56,19 @@ class SaveStoreConfig:
 
 
 class GameSaveStore:
-    def __init__(self, config: SaveStoreConfig | str) -> None:
-        self.config = SaveStoreConfig(database_url=config) if isinstance(config, str) else config
-        self.engine: Engine = create_engine(self.config.database_url, echo=self.config.echo, future=True)
+    def __init__(self, config: "SaveStoreConfig | str | Database") -> None:
+        # 三种入参：注入的 Database（推荐，复用统一连接来源）、连接串、或旧配置对象。
+        if isinstance(config, Database):
+            self._database = config
+            self.config = SaveStoreConfig(database_url=config.config.database_url)
+        else:
+            self.config = (
+                SaveStoreConfig(database_url=config) if isinstance(config, str) else config
+            )
+            self._database = Database(
+                DatabaseConfig(database_url=self.config.database_url, echo=self.config.echo)
+            )
+        self.engine: Engine = self._database.engine
         self._session_factory = sessionmaker(self.engine, expire_on_commit=False, future=True)
 
     def create_schema(self) -> None:
