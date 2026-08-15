@@ -4,6 +4,7 @@ import unittest
 
 from Actor.ActorFormatter import _build_actor_payload
 from CharacterProfile import ensure_character_profile
+from Memory.default_provider import DefaultActorMemoryProvider
 from GameState import create_character_runtime_state, create_initial_game_state, create_player_state
 
 
@@ -189,7 +190,9 @@ class ActorFormatterPayloadTests(unittest.TestCase):
     def test_actor_payload_reorders_memory_and_drops_runtime_memory(self) -> None:
         state, profiles = _build_state_and_profiles()
 
-        payload = _build_actor_payload(state, profiles)
+        actor_id = state["runtime"]["next_act"]["actor"]
+        ctx = DefaultActorMemoryProvider(character_profiles=profiles).build(actor_id, state)
+        payload = _build_actor_payload(state, ctx)
 
         self.assertEqual(
             list(payload.keys()),
@@ -229,6 +232,10 @@ class ActorFormatterPayloadTests(unittest.TestCase):
             [item["summary"] for item in payload["recent_short_term_memory"]],
             [f"short-term event {index}" for index in range(2, 12)],
         )
+        # recent_history 改用工厂在场过滤后的短期(ctx.short_term),而非 history[-8:]。
+        self.assertEqual(payload["recent_history"], list(ctx.short_term))
+        # actor_profile 改由 ctx.persona 供给(等价替换)。
+        self.assertEqual(payload["actor_profile"], ctx.persona)
 
 
 if __name__ == "__main__":

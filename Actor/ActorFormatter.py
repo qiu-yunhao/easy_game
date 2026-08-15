@@ -3,8 +3,8 @@ from __future__ import annotations
 from typing import Any, Mapping
 
 from CharacterMemory import ensure_character_memory_state, normalize_character_memory_config
-from CharacterProfile import CharacterProfile
 from GameState import GameState, ResolvedAct
+from Memory.context import ActorMemoryContext
 from PromptUtils import render_json_instruction
 from ResolvedActUtils import build_resolved_act_payload
 from ScenePlan import ScenePlan
@@ -23,11 +23,12 @@ def _build_actor_runtime_prompt_state(actor_runtime: Mapping[str, Any]) -> dict[
 
 def _build_actor_payload(
     state: GameState,
-    character_profiles: dict[str, CharacterProfile],
+    memory_ctx: ActorMemoryContext,
 ) -> dict[str, Any]:
     planned_act = state["runtime"].get("next_act")
-    actor_id = planned_act.get("actor") if planned_act else None
-    actor_profile = character_profiles.get(actor_id or "", {})
+    # actor_id 以工厂 build 的 actor 为准,保证与 ctx.short_term 过滤对象一致。
+    actor_id = memory_ctx.actor_id
+    actor_profile = memory_ctx.persona
     actor_runtime = state["characters"].get(actor_id or "", {})
     actor_memory_profile = normalize_character_memory_config(
         actor_profile.get("memory_profile", {}),
@@ -68,7 +69,7 @@ def _build_actor_payload(
         "player_memory": actor_memory.get("player_memory", {}),
         "actor_runtime": actor_runtime_prompt,
         "next_act": planned_act,
-        "recent_history": state["history"][-8:],
+        "recent_history": list(memory_ctx.short_term),
         "recent_short_term_memory": actor_memory.get("short_term_memory", [])[-10:],
     }
 
@@ -213,9 +214,9 @@ def normalize_resolved_act(
 
 def build_actor_instruction(
     state: GameState,
-    character_profiles: dict[str, CharacterProfile],
+    memory_ctx: ActorMemoryContext,
 ) -> str:
-    payload = _build_actor_payload(state, character_profiles)
+    payload = _build_actor_payload(state, memory_ctx)
     return render_json_instruction(
         "Use the following scene context to produce one role-faithful turn as strict JSON.",
         payload,
@@ -224,11 +225,11 @@ def build_actor_instruction(
 
 def build_l2_actor_instruction(
     state: GameState,
-    character_profiles: dict[str, CharacterProfile],
+    memory_ctx: ActorMemoryContext,
     *,
     policy_decision: Mapping[str, Any],
 ) -> str:
-    payload = _build_actor_payload(state, character_profiles)
+    payload = _build_actor_payload(state, memory_ctx)
     payload["supporting_scene_intent"] = dict(policy_decision)
     return render_json_instruction(
         "Use the following scene context to produce one L2 supporting turn as strict JSON. "
@@ -239,9 +240,9 @@ def build_l2_actor_instruction(
 
 def build_l1_actor_instruction(
     state: GameState,
-    character_profiles: dict[str, CharacterProfile],
+    memory_ctx: ActorMemoryContext,
 ) -> str:
-    payload = _build_actor_payload(state, character_profiles)
+    payload = _build_actor_payload(state, memory_ctx)
     return render_json_instruction(
         "Use the following scene context to produce one L1 core-character turn as strict JSON. "
         "Honor the role's major conflict and dramatic weight while staying scene-bound.",
