@@ -73,6 +73,7 @@ def resolve_npc_turn_state(
         # 从计划的 next_act 取 actor_id,由记忆工厂 build 出只读记忆上下文。
         planned_act = state["runtime"].get("next_act") or {}
         actor_id = str(planned_act.get("actor", "") or "").strip()
+        assert deps.actor_memory_provider is not None, "actor_memory_provider 未注入(本轮强制注入,不做静默降级)"
         memory_ctx = deps.actor_memory_provider.build(actor_id, state)
         resolved_act = actor_agent.perform_turn(
             state=state,

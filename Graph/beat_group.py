@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import logging
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any, Callable
 
 from Actor.ActorRuntime import apply_resolved_act
+
+if TYPE_CHECKING:
+    from Memory.provider import ActorMemoryProvider
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +58,7 @@ def _perform_with_retry(
     group_start_state: dict[str, Any],
     actor_id: str,
     resolve_agent: Callable[[str], Any],
-    provider: Any,
+    provider: "ActorMemoryProvider",
     max_retries: int,
 ) -> dict[str, Any]:
     # Each actor reads the group-start history (no intra-group pre-reading).
@@ -70,6 +73,7 @@ def _perform_with_retry(
         },
     }
     # 每个 actor 各自基于其 actor_state build 记忆上下文(与串行路径一致)。
+    assert provider is not None, "actor_memory_provider 未注入(本轮强制注入,不做静默降级)"
     memory_ctx = provider.build(actor_id, actor_state)
     last_error: Exception | None = None
     for _attempt in range(max_retries + 1):
@@ -93,7 +97,7 @@ def run_actor_group(
     *,
     group: list[str],
     resolve_agent: Callable[[str], Any],
-    provider: Any,
+    provider: "ActorMemoryProvider",
     max_retries: int = 3,
 ) -> tuple[list[tuple[str, dict[str, Any]]], list[tuple[str, str]]]:
     if not group:
