@@ -10,11 +10,14 @@ from CharacterProfile import ensure_character_profile, ensure_character_profiles
 from CharacterRepository import CharacterRepository
 from Graph.builder import (
     initialize_story_session,
-    prepare_chapter_turn,
     prepare_story_setup,
     resolve_story_turn,
 )
 from Graph.beat_subgraph import is_player_turn
+from Graph.conversation_controller import (
+    ConversationController,
+    stop_at_player_turn,
+)
 from Narrator.NarrationPresets import (
     DEFAULT_NARRATION_STYLE_PRESET,
     NARRATION_STYLE_GUIDANCE,
@@ -371,7 +374,7 @@ class WebGameSession:
                 raise RuntimeError("请先初始化场景，再提交玩家动作。")
             if self.state["runtime"].get("scene_finished", False):
                 raise RuntimeError("当前场景已经结束，请重置后继续。")
-            self._advance_until_player_turn()
+            self.state, _ = self._controller.advance(self.state, stop_when=stop_at_player_turn)
             if not is_player_turn(self.state):
                 raise RuntimeError("当前还没有轮到玩家行动。")
             tool_response = self._maybe_handle_player_intent_plan_unlocked(raw_input)
@@ -379,7 +382,9 @@ class WebGameSession:
                 return tool_response
             self._player_interface.push_action(raw_input)
             self.state = resolve_story_turn(self.state, self.deps)
-            self.last_handoff_reason = self._advance_until_player_turn()
+            self.state, self.last_handoff_reason = self._controller.advance(
+                self.state, stop_when=stop_at_player_turn
+            )
             return self.serialize_state()
 
     def apply_player_action_streaming(
@@ -398,7 +403,7 @@ class WebGameSession:
                 raise RuntimeError("请先初始化场景，再提交玩家动作。")
             if self.state["runtime"].get("scene_finished", False):
                 raise RuntimeError("当前场景已经结束，请重置后继续。")
-            self._advance_until_player_turn()
+            self.state, _ = self._controller.advance(self.state, stop_when=stop_at_player_turn)
             if not is_player_turn(self.state):
                 raise RuntimeError("当前还没有轮到玩家行动。")
 
@@ -417,7 +422,9 @@ class WebGameSession:
                 return tool_response
             self._player_interface.push_action(raw_input)
             self.state = resolve_story_turn(self.state, self.deps, _emit)
-            self.last_handoff_reason = self._advance_until_player_turn(on_event=_emit)
+            self.state, self.last_handoff_reason = self._controller.advance(
+                self.state, stop_when=stop_at_player_turn, on_event=_emit
+            )
             return self.serialize_state()
 
     def _maybe_handle_player_intent_plan_unlocked(self, raw_input: str) -> dict[str, Any] | None:
@@ -460,7 +467,9 @@ class WebGameSession:
                     continue
                 self._player_interface.push_action(action_text)
                 self.state = resolve_story_turn(self.state, self.deps)
-                self.last_handoff_reason = self._advance_until_player_turn()
+                self.state, self.last_handoff_reason = self._controller.advance(
+                    self.state, stop_when=stop_at_player_turn
+                )
                 executed = True
                 if self.state["runtime"].get("scene_finished", False):
                     break
@@ -583,98 +592,21 @@ class WebGameSession:
             self.deps.player_intent_planner_agent = self.deps.component_factory.build_player_intent_planner_agent()
         if self.config.mode in {"agent-first", "live"}:
             warm_model_clients(self.deps.player_intent_planner_agent, self.deps.semantic_parser_agent)
+        # deps 每次重建后重新构造 controller,保证其恒指向最新 deps。
+        self._controller = ConversationController(self.deps)
 
     def _initialize_story(self) -> None:
         if self.config.mode in {"agent-first", "live"}:
             self.state = prepare_story_setup(self.state, self.deps)
-            self.state = self._prime_opening_player_turn(self.state)
+            self.state = self._controller.prime_opening_turn(self.state)
             self.story_initialized = True
             self.last_handoff_reason = "开场交接完成，等待玩家定义第一步行动。"
             return
         self.state = initialize_story_session(self.state, self.deps)
         self.story_initialized = True
-        self.last_handoff_reason = self._advance_until_player_turn()
-
-    def _prime_opening_player_turn(self, state: dict[str, Any]) -> dict[str, Any]:
-        player_actor = str(state["player"].get("controlled_character", "") or "").strip()
-        suppressed = {
-            str(actor_id).strip()
-            for actor_id in state["scene"].get("suppressed", [])
-            if str(actor_id).strip()
-        }
-        eligible_actors = [
-            str(actor_id).strip()
-            for actor_id in state["scene"].get("on_stage", [])
-            if str(actor_id).strip() and str(actor_id).strip() not in suppressed
-        ]
-        if player_actor and player_actor not in eligible_actors:
-            eligible_actors.insert(0, player_actor)
-        target = str(state["scene"].get("focus_character", "") or "").strip()
-        if target == player_actor:
-            target = ""
-        if not target:
-            target = next((actor_id for actor_id in eligible_actors if actor_id != player_actor), "")
-        next_act = (
-            {
-                "actor": player_actor,
-                "mode": "speak",
-                "target": target or None,
-                "motivation": "开场先交给玩家，让玩家定义第一步，再进入导演调度。",
-                "content": "",
-            }
-            if player_actor
-            else None
+        self.state, self.last_handoff_reason = self._controller.advance(
+            self.state, stop_when=stop_at_player_turn
         )
-        return {
-            **state,
-            "runtime": {
-                **state["runtime"],
-                "eligible_actors": eligible_actors,
-                "pending_beat_actors": [],
-                "beat_fallback_turns_remaining": 0,
-                "narration_queue": [],
-                "next_act": next_act,
-                "resolved_act": None,
-                "scene_end_evaluation": None,
-            },
-        }
-
-    def _ensure_prepared_turn(self) -> None:
-        if self.story_initialized and not self.state["runtime"].get("scene_finished", False) and self.state["runtime"].get("next_act") is None:
-            self.state = prepare_chapter_turn(self.state, self.deps)
-
-    def _advance_until_player_turn(
-        self,
-        max_hops: int = 24,
-        on_event: "Callable[[dict[str, Any]], None] | None" = None,
-    ) -> str:
-        hops = 0
-        npc_acted = False
-        while hops < max_hops:
-            hops += 1
-            self._ensure_prepared_turn()
-            if self.state["runtime"].get("scene_finished", False):
-                reason = self.state["runtime"].get("scene_end_evaluation", {}).get("reason", "")
-                return reason or "当前场景已经结束。"
-            next_act = self.state["runtime"].get("next_act")
-            if next_act is None:
-                return "当前没有新的自动后续动作。"
-            if is_player_turn(self.state):
-                if npc_acted:
-                    return "场景角色动作已结算，等待玩家回应。"
-                eligible = [
-                    actor_id
-                    for actor_id in self.state["runtime"].get("eligible_actors", [])
-                    if actor_id != self.state["player"].get("controlled_character")
-                ]
-                return (
-                    "等待玩家行动。当前仍有可响应角色在场：" + "、".join(eligible) + "。"
-                    if eligible
-                    else "等待玩家定义下一步行动。"
-                )
-            self.state = resolve_story_turn(self.state, self.deps, on_event)
-            npc_acted = True
-        raise RuntimeError("自动推进超过安全跳数，仍未到达稳定交接点。")
 
     def serialize_state(self) -> dict[str, Any]:
         state = self.state
