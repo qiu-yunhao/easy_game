@@ -2,7 +2,16 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from Recall.domain.documents import RecallDoc
+from datatypes import VectorDoc, tenant_prefix
+
+"""场景索引层：把一整幕游戏历史转换为可入库的 ``VectorDoc`` 双粒度文档。
+
+对齐基础模块的通用契约 ``datatypes.VectorDoc``：稳定字段只留 doc_id / doc_type /
+text，业务字段（user_id/player_id/scene_id/chapter_id/turn_start/turn_end/
+importance/recency）统一下沉到 ``metadata``，供 ``PgVectorStore`` 入库、
+``HybridRetrieval`` 过滤与重排消费。租户前缀复用 ``datatypes.tenant_prefix``，
+不再各自实现。
+"""
 
 
 def _parse_turn_range(turn_range: str) -> tuple[int, int]:
@@ -26,13 +35,31 @@ def _parse_turn_range(turn_range: str) -> tuple[int, int]:
     return (0, 0)
 
 
-def _tenant_prefix(user_id: int, player_id: int, scene_id: str) -> str:
-    """构造带租户隔离的 doc_id 前缀。
+def _build_metadata(
+    *,
+    user_id: int,
+    player_id: int,
+    scene_id: str,
+    chapter_id: str,
+    turn_start: int,
+    turn_end: int,
+    importance: float,
+) -> dict[str, Any]:
+    """组装 ``VectorDoc.metadata``，集中一处保证各粒度文档字段口径一致。
 
-    云端多用户下 scene_id 由 chapter+序号拼成、各玩家共用同一套，若不加租户前缀，
-    不同玩家的同名场景会生成相同 doc_id，upsert 时互相覆盖造成跨租户数据丢失。
+    recency（新近度）在索引期先取 ``turn_end`` 作单调代理——回合越大越新；
+    真正的相对衰减需要「当前 turn」，只能在查询期计算，届时可覆盖此值。
     """
-    return f"u{user_id}:p{player_id}:{scene_id}"
+    return {
+        "user_id": user_id,
+        "player_id": player_id,
+        "scene_id": scene_id,
+        "chapter_id": chapter_id,
+        "turn_start": turn_start,
+        "turn_end": turn_end,
+        "importance": importance,
+        "recency": float(turn_end),
+    }
 
 
 def build_scene_summary_doc(
@@ -42,7 +69,7 @@ def build_scene_summary_doc(
     chapter_id: str,
     user_id: int,
     player_id: int,
-) -> Optional[RecallDoc]:
+) -> Optional[VectorDoc]:
     """把一整幕的 SceneMemory 压缩为一条「整幕摘要」粒度的回忆文档。
 
     这是粗粒度文档，用于回答「我经历过什么」这类概括性回忆：正文取场景摘要
@@ -62,17 +89,19 @@ def build_scene_summary_doc(
 
     turn_start, turn_end = _parse_turn_range(scene_memory.get("turn_range", ""))
 
-    return RecallDoc(
-        doc_id=f"{_tenant_prefix(user_id, player_id, scene_id)}:scene_summary",
+    return VectorDoc(
+        doc_id=f"{tenant_prefix(user_id, player_id)}{scene_id}:scene_summary",
         doc_type="scene_summary",
-        user_id=user_id,
-        player_id=player_id,
-        scene_id=scene_id,
-        chapter_id=chapter_id,
-        turn_start=turn_start,
-        turn_end=turn_end,
-        importance=importance,
         text=text,
+        metadata=_build_metadata(
+            user_id=user_id,
+            player_id=player_id,
+            scene_id=scene_id,
+            chapter_id=chapter_id,
+            turn_start=turn_start,
+            turn_end=turn_end,
+            importance=importance,
+        ),
     )
 
 
@@ -84,7 +113,7 @@ def build_act_chunk_docs(
     user_id: int,
     player_id: int,
     chunk_size: int = 4,
-) -> list[RecallDoc]:
+) -> list[VectorDoc]:
     """把一整幕的历史记录按固定条数切块，产出「行动片段」粒度的回忆文档。
 
     这是细粒度文档，用于回答「某某说过什么细节」这类精确回忆：每 chunk_size 条
@@ -96,7 +125,7 @@ def build_act_chunk_docs(
     它），另拼会与 content 内容重复。历史为空时返回空列表。
     """
     size = max(1, int(chunk_size))
-    docs: list[RecallDoc] = []
+    docs: list[VectorDoc] = []
     for index in range(0, len(history), size):
         chunk = history[index : index + size]
         turns = [int(item.get("turn", 0) or 0) for item in chunk]
@@ -110,18 +139,22 @@ def build_act_chunk_docs(
             f"{item.get('actor') or '旁白'}: {item.get('content', '') or ''}"
             for item in chunk
         )
+        turn_start = min(turns) if turns else 0
+        turn_end = max(turns) if turns else 0
         docs.append(
-            RecallDoc(
-                doc_id=f"{_tenant_prefix(user_id, player_id, scene_id)}:act_chunk:{index // size}",
+            VectorDoc(
+                doc_id=f"{tenant_prefix(user_id, player_id)}{scene_id}:act_chunk:{index // size}",
                 doc_type="act_chunk",
-                user_id=user_id,
-                player_id=player_id,
-                scene_id=scene_id,
-                chapter_id=chapter_id,
-                turn_start=min(turns) if turns else 0,
-                turn_end=max(turns) if turns else 0,
-                importance=importance,
                 text=text,
+                metadata=_build_metadata(
+                    user_id=user_id,
+                    player_id=player_id,
+                    scene_id=scene_id,
+                    chapter_id=chapter_id,
+                    turn_start=turn_start,
+                    turn_end=turn_end,
+                    importance=importance,
+                ),
             )
         )
     return docs
@@ -136,7 +169,7 @@ def build_scene_docs(
     user_id: int,
     player_id: int,
     chunk_size: int = 4,
-) -> list[RecallDoc]:
+) -> list[VectorDoc]:
     """索引层对外主入口：把一整幕转换为双粒度回忆文档集合。
 
     组合「整幕摘要」与若干「行动片段」两类文档，统一挂上场景元数据，供上层一次性

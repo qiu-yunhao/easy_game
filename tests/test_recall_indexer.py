@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from Recall.domain.documents import RecallDoc
+from datatypes import VectorDoc
 from Recall.indexing.scene_indexer import (
     build_act_chunk_docs,
     build_scene_docs,
@@ -67,6 +67,17 @@ def _history(n_start: int, n_end: int, actor: str = "merchant"):
 
 
 class BuildSceneSummaryDocTests(unittest.TestCase):
+    def test_returns_vector_doc(self):
+        doc = build_scene_summary_doc(
+            _scene_memory(),
+            scene_id="s1",
+            chapter_id="c1",
+            user_id=7,
+            player_id=3,
+        )
+        self.assertIsInstance(doc, VectorDoc)
+        self.assertEqual(doc.doc_type, "scene_summary")
+
     def test_text_combines_summary_and_key_events(self):
         doc = build_scene_summary_doc(
             _scene_memory(),
@@ -75,7 +86,6 @@ class BuildSceneSummaryDocTests(unittest.TestCase):
             user_id=7,
             player_id=3,
         )
-        self.assertEqual(doc.doc_type, "scene_summary")
         self.assertIn("主角在酒馆遇到神秘商人。", doc.text)
         self.assertIn("商人透露了地图线索", doc.text)
         self.assertIn("主角付了定金", doc.text)
@@ -88,9 +98,9 @@ class BuildSceneSummaryDocTests(unittest.TestCase):
             user_id=7,
             player_id=3,
         )
-        self.assertAlmostEqual(doc.importance, 0.8)
+        self.assertAlmostEqual(doc.metadata["importance"], 0.8)
 
-    def test_turn_range_parsed(self):
+    def test_turn_range_parsed_into_metadata(self):
         doc = build_scene_summary_doc(
             _scene_memory(turn_range="10-15"),
             scene_id="s1",
@@ -98,8 +108,32 @@ class BuildSceneSummaryDocTests(unittest.TestCase):
             user_id=7,
             player_id=3,
         )
-        self.assertEqual(doc.turn_start, 10)
-        self.assertEqual(doc.turn_end, 15)
+        self.assertEqual(doc.metadata["turn_start"], 10)
+        self.assertEqual(doc.metadata["turn_end"], 15)
+
+    def test_recency_defaults_to_turn_end(self):
+        doc = build_scene_summary_doc(
+            _scene_memory(turn_range="10-15"),
+            scene_id="s1",
+            chapter_id="c1",
+            user_id=7,
+            player_id=3,
+        )
+        # 索引期无「当前 turn」，recency 先取 turn_end 作单调新近度代理。
+        self.assertAlmostEqual(doc.metadata["recency"], 15.0)
+
+    def test_scene_and_chapter_in_metadata(self):
+        doc = build_scene_summary_doc(
+            _scene_memory(),
+            scene_id="s1",
+            chapter_id="c1",
+            user_id=7,
+            player_id=3,
+        )
+        self.assertEqual(doc.metadata["scene_id"], "s1")
+        self.assertEqual(doc.metadata["chapter_id"], "c1")
+        self.assertEqual(doc.metadata["user_id"], 7)
+        self.assertEqual(doc.metadata["player_id"], 3)
 
     def test_handles_missing_blocks_and_bad_turn_range(self):
         doc = build_scene_summary_doc(
@@ -109,8 +143,8 @@ class BuildSceneSummaryDocTests(unittest.TestCase):
             user_id=7,
             player_id=3,
         )
-        self.assertEqual(doc.importance, 0.0)
-        self.assertEqual((doc.turn_start, doc.turn_end), (0, 0))
+        self.assertEqual(doc.metadata["importance"], 0.0)
+        self.assertEqual((doc.metadata["turn_start"], doc.metadata["turn_end"]), (0, 0))
 
     def test_doc_id_is_stable(self):
         kwargs = dict(scene_id="s1", chapter_id="c1", user_id=7, player_id=3)
@@ -123,9 +157,17 @@ class BuildSceneSummaryDocTests(unittest.TestCase):
         a = build_scene_summary_doc(base, scene_id="s1", chapter_id="c1", user_id=7, player_id=3)
         b = build_scene_summary_doc(base, scene_id="s1", chapter_id="c1", user_id=9, player_id=3)
         c = build_scene_summary_doc(base, scene_id="s1", chapter_id="c1", user_id=7, player_id=5)
-        # Same scene_id across different tenants must NOT collide.
+        # 同一 scene_id 在不同租户下绝不能撞 id。
         self.assertNotEqual(a.doc_id, b.doc_id)
         self.assertNotEqual(a.doc_id, c.doc_id)
+
+    def test_doc_id_uses_shared_tenant_prefix(self):
+        from datatypes import tenant_prefix
+
+        doc = build_scene_summary_doc(
+            _scene_memory(), scene_id="s1", chapter_id="c1", user_id=7, player_id=3
+        )
+        self.assertTrue(doc.doc_id.startswith(tenant_prefix(7, 3)))
 
     def test_empty_summary_and_events_returns_none(self):
         doc = build_scene_summary_doc(
@@ -145,7 +187,7 @@ class BuildSceneSummaryDocTests(unittest.TestCase):
             user_id=7,
             player_id=3,
         )
-        self.assertEqual((doc.turn_start, doc.turn_end), (12, 12))
+        self.assertEqual((doc.metadata["turn_start"], doc.metadata["turn_end"]), (12, 12))
 
 
 class BuildActChunkDocsTests(unittest.TestCase):
@@ -159,6 +201,7 @@ class BuildActChunkDocsTests(unittest.TestCase):
             chunk_size=4,
         )
         self.assertEqual(len(docs), 3)  # 4 + 4 + 2
+        self.assertTrue(all(isinstance(d, VectorDoc) for d in docs))
         self.assertTrue(all(d.doc_type == "act_chunk" for d in docs))
 
     def test_chunk_turn_bounds(self):
@@ -170,8 +213,24 @@ class BuildActChunkDocsTests(unittest.TestCase):
             player_id=3,
             chunk_size=4,
         )
-        self.assertEqual((docs[0].turn_start, docs[0].turn_end), (1, 4))
-        self.assertEqual((docs[1].turn_start, docs[1].turn_end), (5, 6))
+        self.assertEqual(
+            (docs[0].metadata["turn_start"], docs[0].metadata["turn_end"]), (1, 4)
+        )
+        self.assertEqual(
+            (docs[1].metadata["turn_start"], docs[1].metadata["turn_end"]), (5, 6)
+        )
+
+    def test_chunk_recency_defaults_to_turn_end(self):
+        docs = build_act_chunk_docs(
+            _history(1, 6),
+            scene_id="s1",
+            chapter_id="c1",
+            user_id=7,
+            player_id=3,
+            chunk_size=4,
+        )
+        self.assertAlmostEqual(docs[0].metadata["recency"], 4.0)
+        self.assertAlmostEqual(docs[1].metadata["recency"], 6.0)
 
     def test_chunk_text_includes_actor_and_content(self):
         docs = build_act_chunk_docs(
@@ -196,7 +255,7 @@ class BuildActChunkDocsTests(unittest.TestCase):
             chunk_size=4,
         )
         # scores: 0.2, 0.4 -> max 0.4
-        self.assertAlmostEqual(docs[0].importance, 0.4)
+        self.assertAlmostEqual(docs[0].metadata["importance"], 0.4)
 
     def test_empty_history_yields_no_docs(self):
         docs = build_act_chunk_docs(
@@ -241,11 +300,11 @@ class BuildSceneDocsTests(unittest.TestCase):
             player_id=3,
         )
         for d in docs:
-            self.assertEqual(d.scene_id, "s1")
-            self.assertEqual(d.chapter_id, "c1")
-            self.assertEqual(d.user_id, 7)
-            self.assertEqual(d.player_id, 3)
-            self.assertIsInstance(d, RecallDoc)
+            self.assertIsInstance(d, VectorDoc)
+            self.assertEqual(d.metadata["scene_id"], "s1")
+            self.assertEqual(d.metadata["chapter_id"], "c1")
+            self.assertEqual(d.metadata["user_id"], 7)
+            self.assertEqual(d.metadata["player_id"], 3)
 
     def test_empty_summary_omits_summary_doc(self):
         docs = build_scene_docs(
