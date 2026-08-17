@@ -26,6 +26,9 @@
 - **逐拍粒度**:每次轮询 `/api/auto/step` 推少量拍(3-5 拍)。
 - **关闭后恢复**:关闭开关后还原 `enabled`/`agent_type`,当前正在推进的一批演完,
   到下一个玩家角色回合自然停下等待输入。
+- **章节边界停止**(2026-08-17 追加):自动模式在**一个章节结束**时停下,等用户点"继续
+  下一章"再继续;停止边界是**章节**(非场景——章节内多个 scene 连续自动推进不打断)。
+  用户确认后**自动继续**:开关保持开启,前端重启轮询直接进入下一章自动演绎,无需重开开关。
 
 ---
 
@@ -102,6 +105,40 @@ def advance(
 ```
 (`beats_done = 0` 在循环前初始化。)
 
+### 3.1a advance 增加 stop_on_chapter_end(章节边界停止)
+
+**时序核实(源码确认)**:`resolve_story_turn`(`builder.py:149-155`)= `beat_resolution_node`
++ `TRANSITION_NODES`。`beat_resolution_node` 内 `run_beat_loop`(`beat_subgraph.py:140`)
+在 `chapter_finished=True` 时 break;紧接着同一次 `resolve_story_turn` 尾部的
+`chapter_transition_node`(`transition_nodes.py:276-320`)**在同一拍内**消费
+`chapter_finished`、构建下一章 payload、把 `chapter_finished` 重置为 False、`plot.chapter_id`
+改为下一章、`next_act=None`。
+
+**关键推论**:`chapter_finished` 是"一拍内瞬态"——`advance` 拿到 state 时它已被清、
+plot 已切到下一章。故**不能靠检查 `chapter_finished` 停在章节边界**,必须检测
+**`plot.chapter_id` 是否在这一拍发生变化**。
+
+新增参数 `stop_on_chapter_end: bool = False`。语义:
+- 默认 False:行为与现状/纯 max_beats 一致。
+- True:每拍执行 `resolve_story_turn` **之前**记录 `chapter_id_before`;执行**之后**若
+  `state["plot"]["chapter_id"] != chapter_id_before`(说明这一拍跨了章),**正常返回**
+  `(state, "本章已结束，等待确认后进入下一章。")`。此时 state 已是下一章开头
+  (`next_act=None`、scene 待 setup),用户确认后下一次 `auto_step` 会 `prepare_chapter_turn`
+  补出下一章首回合、继续演。
+- 与 `max_beats` 并存:两者谁先命中谁返回(章节切换 or 拍数上限),不冲突。
+
+循环改动(在 3.1 基础上):
+```python
+        chapter_before = str(state["plot"].get("chapter_id", "") or "")
+        state = resolve_story_turn(state, self._deps, on_event)
+        npc_acted = True
+        beats_done += 1
+        if stop_on_chapter_end and str(state["plot"].get("chapter_id", "") or "") != chapter_before:
+            return state, "本章已结束，等待确认后进入下一章。"
+        if max_beats is not None and beats_done >= max_beats:
+            return state, f"已自动推进 {beats_done} 拍。"
+```
+
 ### 3.2 WebGameSession 自动模式状态
 新增字段(在 `__init__`):
 ```python
@@ -152,15 +189,26 @@ def auto_step(self, max_beats: int = 4) -> dict[str, Any]:
             raise RuntimeError("自动模式未开启。")
         if self.state["runtime"].get("scene_finished", False):
             raise RuntimeError("当前场景已经结束，请重置后继续。")
+        chapter_before = str(self.state["plot"].get("chapter_id", "") or "")
         self.state, self.last_handoff_reason = self._controller.advance(
             self.state,
             stop_when=never_stop,
             max_beats=max_beats,
             max_hops=max_beats + 8,   # 硬安全余量,防 group/补拍导致 hops 略多于 beats
+            stop_on_chapter_end=True,  # 章节切换即停,交前端等用户确认下一章
+        )
+        # 供前端判定"这一批是否因章节切换而停":chapter_id 变了即刚跨章。
+        self._last_chapter_advanced = (
+            str(self.state["plot"].get("chapter_id", "") or "") != chapter_before
         )
         self._maybe_index_finished_scene_unlocked()
         return self.serialize_state()
 ```
+- `_last_chapter_advanced`(`__init__` 初始化为 `False`)记录本批是否跨章;`serialize_state`
+  额外暴露 `chapter_paused`(= 本批跨了章 ∧ 仍在自动模式),前端据此停轮询、显示"继续下一章"。
+- 用户点"继续下一章"= 再次 `POST /api/auto/step`:此时 state 已在下一章开头,`auto_step`
+  的 `advance` 会 `prepare_chapter_turn` 补出下一章首回合继续演,直到再次跨章或到拍数上限。
+
 import 增补:`from Graph.conversation_controller import (..., never_stop)`。
 
 ### 3.3 web_server 路由
@@ -181,16 +229,24 @@ import 增补:`from Graph.conversation_controller import (..., never_stop)`。
 
 ### 3.4 前端(frontend/app.js + index.html)
 - `API` 表加 `auto: "/api/auto"`、`autoStep: "/api/auto/step"`。
-- `index.html`:在动作输入区附近加一个"自动"开关(checkbox 或 toggle button)+ 状态提示。
+- `index.html`:在动作输入区附近加一个"自动"开关(checkbox 或 toggle button)+ 状态提示;
+  再加一个"继续下一章"按钮(默认隐藏,章节暂停时显示)。
 - `app.js`:
-  - `autoTimer`(setInterval 句柄)、`autoBusy`(防重入)。
+  - `autoTimer`(setInterval 句柄)、`autoBusy`(防重入)、`chapterPaused`(章节暂停态)。
   - 开关打开 → `POST /api/auto {enabled:true}` → 渲染 state → 启动
     `setInterval(pollAutoStep, ~1500ms)`。
-  - `pollAutoStep`:若 `autoBusy` 或 `scene_finished` 则跳过;`autoBusy=true`;
-    `POST /api/auto/step {max_beats:4}` → 渲染新历史/state;`scene_finished` 时
-    自动停轮询并把开关复位;`finally autoBusy=false`。
-  - 开关关闭 → 停 `setInterval` → `POST /api/auto {enabled:false}` → 渲染 state。
-  - 自动模式期间禁用手动输入框与提示按钮(复用现有 `isBusy` 禁用逻辑,自动开启即 busy 态)。
+  - `pollAutoStep`:若 `autoBusy` 或 `chapterPaused` 或 `scene_finished` 则跳过;
+    `autoBusy=true`;`POST /api/auto/step {max_beats:4}` → 渲染新历史/state;
+    - 若返回 `state.chapter_paused` 为真 → **停轮询但开关保持开启**,`chapterPaused=true`,
+      显示"继续下一章"按钮 + 提示("本章已结束");
+    - 若 `scene_finished` → 停轮询并把开关复位(整局结束语义,同原设计);
+    - `finally autoBusy=false`。
+  - "继续下一章"按钮点击 → `chapterPaused=false` → 隐藏按钮 → 重启
+    `setInterval(pollAutoStep, ~1500ms)`(开关始终未动,直接进入下一章自动演绎)。
+  - 开关关闭 → 停 `setInterval`、清 `chapterPaused`、隐藏"继续下一章"按钮 →
+    `POST /api/auto {enabled:false}` → 渲染 state。
+  - 自动模式期间禁用手动输入框与提示按钮(复用现有 `isBusy` 禁用逻辑,自动开启即 busy 态);
+    章节暂停时手动输入仍保持禁用(自动模式未关,只是等确认续章)。
 
 ### 3.5 数据流
 ```
@@ -201,11 +257,18 @@ import 增补:`from Graph.conversation_controller import (..., never_stop)`。
 
 [逐拍] 前端 pollAutoStep(每 ~1.5s)
   → POST /api/auto/step {max_beats:4}
-  → auto_step: controller.advance(never_stop, max_beats=4)  # 玩家角色由 L1 agent 演绎
-  → 返回 state(含新历史);scene_finished 则前端停轮询 + 复位开关
+  → auto_step: controller.advance(never_stop, max_beats=4, stop_on_chapter_end=True)
+    # 玩家角色由 L1 agent 演绎;若这一批跨了章,advance 提前停在下一章开头
+  → 返回 state(含新历史 + chapter_paused/scene_finished)
+  → chapter_paused → 停轮询、开关保持、显示"继续下一章"
+  → scene_finished → 停轮询 + 复位开关(整局结束)
+
+[续章] 前端点"继续下一章"
+  → 重启 setInterval 轮询(state 已在下一章开头)
+  → auto_step 的 advance 补出下一章首回合继续演
 
 [关闭] 前端 toggle off
-  → 停 setInterval
+  → 停 setInterval、清 chapterPaused
   → POST /api/auto {enabled:false}
   → set_auto_mode(False): 还原 agent_type、player.enabled=True
   → 下一个玩家回合 is_player_turn 恢复 True,apply_player_action 重新等输入

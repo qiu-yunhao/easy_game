@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 让玩家开启"自动"开关后,玩家角色临时升格为 L1 核心角色由 L1 actor agent 自动演绎,逐拍推进(每次轮询推 3-5 拍);关闭后下一个玩家回合恢复等待输入。
+**Goal:** 让玩家开启"自动"开关后,玩家角色临时升格为 L1 核心角色由 L1 actor agent 自动演绎,逐拍推进(每次轮询推 3-5 拍);每个章节结束时停下等用户点"继续下一章",确认后自动续演;关闭后下一个玩家回合恢复等待输入。
 
-**Architecture:** 复用阶段5 的 `ConversationController`。给 `advance` 增加 `max_beats` 拍数上限参数(默认 None 不影响现有调用)。`WebGameSession` 新增 `set_auto_mode`(改 `player.enabled=False` + 玩家 profile `agent_type="L1"`,关闭时还原)和 `auto_step`(调 `advance(never_stop, max_beats)`)。`web_server` 加 `/api/auto`、`/api/auto/step` 两路由。前端加开关 + 1.5s 轮询。
+**Architecture:** 复用阶段5 的 `ConversationController`。给 `advance` 增加 `max_beats` 拍数上限 + `stop_on_chapter_end`(检测 `plot.chapter_id` 变化以停在章节边界)两个参数(默认不影响现有调用)。`WebGameSession` 新增 `set_auto_mode`(改 `player.enabled=False` + 玩家 profile `agent_type="L1"`,关闭时还原)和 `auto_step`(调 `advance(never_stop, max_beats, stop_on_chapter_end=True)`,暴露 `chapter_paused`)。`web_server` 加 `/api/auto`、`/api/auto/step` 两路由。前端加开关 + 1.5s 轮询 + "继续下一章"按钮。
 
 **Tech Stack:** Python(unittest + pytest),vanilla JS 前端,`http.server` 后端。测试用 `unittest.mock.patch` 在模块级打桩,`WebGameSession(SessionConfig(mode="heuristic"))` 起真实无 LLM/DB 会话。
 
@@ -97,7 +97,34 @@ class AdvanceMaxBeatsTest(unittest.TestCase):
             result, reason = controller.advance(state, stop_when=never_stop, max_hops=24)
         self.assertTrue(result["runtime"]["scene_finished"])
         self.assertEqual(reason, "自然结束")
+
+    @patch("Graph.conversation_controller.is_player_turn", _fake_is_player_turn)
+    @patch("Graph.conversation_controller.prepare_chapter_turn", lambda s, d: s)
+    def test_advance_stops_on_chapter_change(self):
+        # stop_on_chapter_end=True 时,某拍 resolve 后 plot.chapter_id 变了(跨章)→ 提前停,
+        # 返回"本章已结束"reason,不再继续下一章。
+        seq = iter(["c1", "c2"])  # 第 2 拍把 chapter_id 从 c1 切到 c2
+
+        def _fake_resolve(state, deps, on_event=None):
+            return {
+                **state,
+                "plot": {**state["plot"], "chapter_id": next(seq)},
+                "runtime": {**state["runtime"], "next_act": {"actor": "npc_a"}},
+            }
+
+        controller = ConversationController(deps=object())
+        state = _base_state({"actor": "npc_a"})
+        state = {**state, "plot": {**state.get("plot", {}), "chapter_id": "c1"}}
+        with patch("Graph.conversation_controller.resolve_story_turn", _fake_resolve):
+            result, reason = controller.advance(
+                state, stop_when=never_stop, max_beats=8, stop_on_chapter_end=True
+            )
+        self.assertEqual(result["plot"]["chapter_id"], "c2")
+        self.assertIn("本章已结束", reason)
 ```
+
+> 注:`_base_state` 若未含 `plot` 键,上面测试用 `{**state, "plot": {...}}` 显式补上;
+> 实现读 `state["plot"].get("chapter_id", "")`,`_fake_resolve` 也写 `plot`,自洽。
 
 - [ ] **Step 2: 运行测试确认失败**
 
@@ -116,12 +143,15 @@ Expected: FAIL — `TypeError: advance() got an unexpected keyword argument 'max
         stop_when: StopCondition,
         max_hops: int = 24,
         max_beats: int | None = None,
+        stop_on_chapter_end: bool = False,
         on_event: "Callable[[dict[str, Any]], None] | None" = None,
     ) -> tuple[dict[str, Any], str]:
         # 唯一一份推进循环。stop_when 决定何时停下交接:
         # Web 传 stop_at_player_turn,自动模式传 never_stop。
         # max_beats:推进的拍数上限(一次 resolve_story_turn = 一拍);达到即正常返回,
         # 供自动模式逐拍推进(never_stop 下不靠 stop_when 停,靠 max_beats 分批)。
+        # stop_on_chapter_end:某拍跨了章(plot.chapter_id 变化)即正常返回,停在下一章开头,
+        # 交前端等用户确认后再续章(chapter_finished 是一拍内瞬态,故检测 chapter_id 变化)。
         # 注意:never_stop 下 max_hops 是硬安全上限——须 >= max_beats,否则先撞 hops 抛错。
         hops = 0
         npc_acted = False
@@ -150,9 +180,12 @@ Expected: FAIL — `TypeError: advance() got an unexpected keyword argument 'max
                     if eligible
                     else "等待玩家定义下一步行动。"
                 )
+            chapter_before = str(state["plot"].get("chapter_id", "") or "")
             state = resolve_story_turn(state, self._deps, on_event)
             npc_acted = True
             beats_done += 1
+            if stop_on_chapter_end and str(state["plot"].get("chapter_id", "") or "") != chapter_before:
+                return state, "本章已结束，等待确认后进入下一章。"
             if max_beats is not None and beats_done >= max_beats:
                 return state, f"已自动推进 {beats_done} 拍。"
         raise RuntimeError("自动推进超过安全跳数，仍未到达稳定交接点。")
@@ -161,7 +194,7 @@ Expected: FAIL — `TypeError: advance() got an unexpected keyword argument 'max
 - [ ] **Step 4: 运行测试确认通过**
 
 Run: `cd "/Users/qiuyunhao.1/Desktop/claude coding/easy_game" && python3 -m pytest tests/test_conversation_controller.py -v`
-Expected: PASS(原有 8 个 + 新增 3 个 = 11 个全过)
+Expected: PASS(原有 8 个 + 新增 4 个 = 12 个全过)
 
 - [ ] **Step 5: 提交**
 
@@ -274,6 +307,7 @@ from Graph.conversation_controller import (
 ```python
         self.auto_mode = False
         self._player_saved_agent_type: str | None = None
+        self._last_chapter_advanced = False
 ```
 
 3c. 在 `apply_player_action`(`:412`)方法定义**之前**,插入三个新方法:
@@ -358,9 +392,10 @@ class AutoStepTest(unittest.TestCase):
         session.set_auto_mode(True)
         captured = {}
 
-        def _fake_advance(state, *, stop_when, max_beats=None, max_hops=24, on_event=None):
+        def _fake_advance(state, *, stop_when, max_beats=None, max_hops=24, stop_on_chapter_end=False, on_event=None):
             captured["stop_when"] = stop_when
             captured["max_beats"] = max_beats
+            captured["stop_on_chapter_end"] = stop_on_chapter_end
             return state, "已自动推进 2 拍。"
 
         with patch.object(session._controller, "advance", _fake_advance):
@@ -369,7 +404,22 @@ class AutoStepTest(unittest.TestCase):
         from Graph.conversation_controller import never_stop
         self.assertIs(captured["stop_when"], never_stop)
         self.assertEqual(captured["max_beats"], 2)
+        self.assertTrue(captured["stop_on_chapter_end"])
         self.assertEqual(result["handoff_reason"], "已自动推进 2 拍。")
+
+    def test_auto_step_sets_chapter_paused_when_chapter_changes(self):
+        # advance 返回后 chapter_id 变了 → serialize_state 的 chapter_paused 为真。
+        session = _session()
+        session.set_auto_mode(True)
+        original_chapter = str(session.state["plot"].get("chapter_id", "") or "")
+
+        def _fake_advance(state, *, stop_when, max_beats=None, max_hops=24, stop_on_chapter_end=False, on_event=None):
+            bumped = {**state, "plot": {**state["plot"], "chapter_id": original_chapter + "-next"}}
+            return bumped, "本章已结束，等待确认后进入下一章。"
+
+        with patch.object(session._controller, "advance", _fake_advance):
+            result = session.auto_step(max_beats=4)
+        self.assertTrue(result["chapter_paused"])
 
     def test_auto_step_raises_when_auto_not_enabled(self):
         session = _session()
@@ -413,20 +463,33 @@ Expected: FAIL — `AttributeError: 'WebGameSession' object has no attribute 'au
                 raise RuntimeError("自动模式未开启。")
             if self.state["runtime"].get("scene_finished", False):
                 raise RuntimeError("当前场景已经结束，请重置后继续。")
+            chapter_before = str(self.state["plot"].get("chapter_id", "") or "")
             self.state, self.last_handoff_reason = self._controller.advance(
                 self.state,
                 stop_when=never_stop,
                 max_beats=max_beats,
                 max_hops=max_beats + 8,
+                stop_on_chapter_end=True,
+            )
+            # 本批是否因跨章而停:chapter_id 变了即刚进下一章开头,前端据此暂停等确认。
+            self._last_chapter_advanced = (
+                str(self.state["plot"].get("chapter_id", "") or "") != chapter_before
             )
             self._maybe_index_finished_scene_unlocked()
             return self.serialize_state()
 ```
 
+**同时**在 `serialize_state` 的返回 dict 里(`chapter_finished` 那一行附近,`web_session.py:708`)
+补一个 `chapter_paused` 字段——章节暂停 = 本批跨了章 ∧ 仍在自动模式:
+
+```python
+            "chapter_paused": bool(getattr(self, "_last_chapter_advanced", False)) and self.auto_mode,
+```
+
 - [ ] **Step 4: 运行测试确认通过**
 
 Run: `cd "/Users/qiuyunhao.1/Desktop/claude coding/easy_game" && python3 -m pytest tests/test_web_session_auto_mode.py -v`
-Expected: PASS(SetAutoModeTest 4 + AutoStepTest 4 = 8 个全过)
+Expected: PASS(SetAutoModeTest 4 + AutoStepTest 5 = 9 个全过)
 
 - [ ] **Step 5: 提交**
 
@@ -480,7 +543,7 @@ Expected: 输出 `ok`,无 SyntaxError/ImportError
 - [ ] **Step 3: 冒烟验证 — 全量测试仍绿(确认没破坏 import 链)**
 
 Run: `cd "/Users/qiuyunhao.1/Desktop/claude coding/easy_game" && python3 -m pytest -q`
-Expected: 全绿(299 基线 + 本轮新增 = 310 全过)
+Expected: 全绿(299 基线 + 本轮新增 = 312 全过)
 
 - [ ] **Step 4: 提交**
 
@@ -521,13 +584,14 @@ EOF
 
 - [ ] **Step 2: index.html 加自动开关 UI**
 
-在 `frontend/index.html` 找到玩家动作输入区(含"背包"按钮 `toggleBackpackButton` 的容器,`grep -n toggleBackpackButton frontend/index.html` 定位)。在该容器内、输入框附近加一个开关:
+在 `frontend/index.html` 找到玩家动作输入区(含"背包"按钮 `toggleBackpackButton` 的容器,`grep -n toggleBackpackButton frontend/index.html` 定位)。在该容器内、输入框附近加一个开关 + 一个"继续下一章"按钮(默认隐藏):
 
 ```html
         <label class="auto-toggle" title="开启后玩家角色自动演绎，逐拍推进">
           <input type="checkbox" id="autoModeToggle" />
           <span>自动</span>
         </label>
+        <button type="button" id="continueChapterButton" style="display: none;">继续下一章</button>
 ```
 
 (样式复用现有类;若无合适类,`class="auto-toggle"` 可留待样式表补,不阻塞功能。)
@@ -538,6 +602,7 @@ EOF
 
 ```javascript
 const autoModeToggle = document.getElementById("autoModeToggle");
+const continueChapterButton = document.getElementById("continueChapterButton");
 ```
 
 在模块级状态变量区(靠近 `let sidebarMode` 等声明处)加:
@@ -545,6 +610,7 @@ const autoModeToggle = document.getElementById("autoModeToggle");
 ```javascript
 let autoTimer = null;
 let autoBusy = false;
+let chapterPaused = false;
 ```
 
 - [ ] **Step 4: 实现开关处理与轮询函数**
@@ -552,8 +618,21 @@ let autoBusy = false;
 在 app.js 里(靠近其他事件绑定/函数定义处,如 `hintButtons.forEach` 绑定附近)加:
 
 ```javascript
+function startAutoPolling() {
+  if (autoTimer === null) {
+    autoTimer = setInterval(pollAutoStep, 1500);
+  }
+}
+
+function stopAutoPolling() {
+  if (autoTimer !== null) {
+    clearInterval(autoTimer);
+    autoTimer = null;
+  }
+}
+
 async function pollAutoStep() {
-  if (autoBusy) return;
+  if (autoBusy || chapterPaused) return;
   if (latestState?.scene_finished) {
     stopAutoMode();
     return;
@@ -568,7 +647,14 @@ async function pollAutoStep() {
     if (!response.ok) throw new Error(`auto step failed: ${response.status}`);
     const state = await response.json();
     render(state);
-    if (state?.scene_finished) stopAutoMode();
+    if (state?.scene_finished) {
+      stopAutoMode();
+    } else if (state?.chapter_paused) {
+      // 章节结束:停轮询但保持自动开关,等用户点"继续下一章"。
+      chapterPaused = true;
+      stopAutoPolling();
+      continueChapterButton.style.display = "";
+    }
   } catch (err) {
     console.error(err);
     stopAutoMode();
@@ -588,16 +674,13 @@ async function startAutoMode() {
     return;
   }
   render(await response.json());
-  if (autoTimer === null) {
-    autoTimer = setInterval(pollAutoStep, 1500);
-  }
+  startAutoPolling();
 }
 
 async function stopAutoMode() {
-  if (autoTimer !== null) {
-    clearInterval(autoTimer);
-    autoTimer = null;
-  }
+  stopAutoPolling();
+  chapterPaused = false;
+  continueChapterButton.style.display = "none";
   if (autoModeToggle.checked) autoModeToggle.checked = false;
   try {
     const response = await fetch(API.auto, {
@@ -618,6 +701,13 @@ autoModeToggle.addEventListener("change", () => {
     stopAutoMode();
   }
 });
+
+continueChapterButton.addEventListener("click", () => {
+  // 用户确认续章:清暂停态、隐藏按钮、重启轮询(自动开关始终未动)。
+  chapterPaused = false;
+  continueChapterButton.style.display = "none";
+  startAutoPolling();
+});
 ```
 
 > 若 app.js 的渲染函数名不是 `render`、当前 state 变量名不是 `latestState`,以文件实际为准(`grep -n "function render\|latestState\|function applyState\|renderState" frontend/app.js` 确认后替换)。
@@ -633,7 +723,9 @@ Expected: 输出 `JS OK`,无语法错误。(若无 node,跳过并在浏览器控
 2. 浏览器打开本地页面,创建角色 → 初始化场景 → 到玩家回合。
 3. 勾选"自动"开关。**预期**:输入框/提示按钮禁用;每 ~1.5s 历史新增角色回合(含玩家角色由 L1 演绎的发言);`handoff_reason` 显示"已自动推进 N 拍"或"自动模式已开启"。
 4. 取消勾选。**预期**:轮询停止;`handoff_reason` 显示"自动模式已关闭";下一个玩家回合恢复等待输入,可手动提交动作。
-5. 重新开启并让其跑到场景结束。**预期**:`scene_finished` 时自动停轮询、开关复位。
+5. 重新开启并让其跑到**章节结束**。**预期**:章节切换时自动停轮询,但"自动"开关**保持勾选**;"继续下一章"按钮出现;`handoff_reason` 显示"本章已结束"。
+6. 点"继续下一章"。**预期**:按钮隐藏、轮询重启,直接进入下一章自动演绎,无需重开开关。
+7. 让其跑到场景/整局结束。**预期**:`scene_finished` 时自动停轮询、开关复位。
 
 若任一步不符,记录现象并回到对应 Task 修复。
 
@@ -662,7 +754,7 @@ EOF
 - [ ] **Step 1: 全量测试**
 
 Run: `cd "/Users/qiuyunhao.1/Desktop/claude coding/easy_game" && python3 -m pytest -q`
-Expected: 全绿。基线 299 + Task1(3)+ Task2(4)+ Task3(4)= 310 全过。
+Expected: 全绿。基线 299 + Task1(4)+ Task2(4)+ Task3(5)= 312 全过。
 
 - [ ] **Step 2: 确认无未提交改动**
 
@@ -678,7 +770,8 @@ Expected: 干净(所有改动已在前 5 个 Task 提交)。
 - §3.2 set_auto_mode / _enable/_disable → Task 2 ✅;auto_step → Task 3 ✅
 - §3.3 web_server 两路由 → Task 4 ✅
 - §3.4 前端开关 + 轮询 → Task 5 ✅
-- §6 测试策略 8 条 → controller max_beats(Task1 3条)+ set_auto_mode(Task2 4条)+ auto_step(Task3 4条)✅
+- §6 测试策略 → controller max_beats + 章节停止(Task1 4条)+ set_auto_mode(Task2 4条)+ auto_step + 章节暂停(Task3 5条)✅
+- 章节边界停止(用户 2026-08-17 追加需求)→ advance `stop_on_chapter_end`(Task1)+ auto_step 传参 + `chapter_paused`(Task3)+ 前端"继续下一章"(Task5)✅
 - §5 存档半自动态 → 按 spec 本轮策略"靠约定 + _disable 还原",不改存档链路,无独立 Task(符合 spec)✅
 
 **2. 占位符扫描:** 无 TBD/TODO;每个改代码的 Step 都给了完整代码块。前端 Task 5 对 `render`/`latestState` 变量名给了"以实际为准"的确认命令(因未逐行读 app.js 1794 行),非占位符而是执行期核实指令。
