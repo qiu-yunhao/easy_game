@@ -16,6 +16,7 @@ from Graph.builder import (
 from Graph.beat_subgraph import is_player_turn
 from Graph.conversation_controller import (
     ConversationController,
+    never_stop,
     stop_at_player_turn,
 )
 from Narrator.NarrationPresets import (
@@ -200,6 +201,9 @@ class WebGameSession:
         self._recall_service: "RecallService | None" = None
         self.last_handoff_reason = "请先确认玩家档案，然后初始化当前场景。"
         self.story_initialized = False
+        self.auto_mode = False
+        self._player_saved_agent_type: str | None = None
+        self._last_chapter_advanced = False
         self.character_profiles: dict[str, dict[str, Any]] = {}
         self.scene_config: dict[str, Any] = {}
         self._rebuild_session(initialize_story=bool(self.config.player_profile))
@@ -408,6 +412,41 @@ class WebGameSession:
         self.story_initialized = bool(session_meta.get("story_initialized", False))
         self.last_handoff_reason = str(session_meta.get("last_handoff_reason") or "已从数据库存档恢复。")
         return self.serialize_state()
+
+    def set_auto_mode(self, enabled: bool) -> dict[str, Any]:
+        with self._lock:
+            if enabled and not self.auto_mode:
+                self._enable_auto_unlocked()
+            elif not enabled and self.auto_mode:
+                self._disable_auto_unlocked()
+            return self.serialize_state()
+
+    def _enable_auto_unlocked(self) -> None:
+        # 玩家角色升格 L1:存原 agent_type,改 profile.agent_type=L1(使调度选 l1_actor_agent),
+        # 关掉 player.enabled 让玩家回合自动流向 actor 调度。
+        player_id = self.config.player_character
+        profile = self.deps.character_profiles.get(player_id, {})
+        self._player_saved_agent_type = str(profile.get("agent_type", "actor") or "actor")
+        self.deps.character_profiles.update_field(player_id, "agent_type", "L1")
+        self.state = {
+            **self.state,
+            "player": {**self.state["player"], "enabled": False},
+        }
+        self.auto_mode = True
+        self.last_handoff_reason = "自动模式已开启：玩家角色临时升格为核心角色自动演绎。"
+
+    def _disable_auto_unlocked(self) -> None:
+        # 还原玩家 agent_type 与 enabled;下一个玩家回合 is_player_turn 恢复 True,重新等输入。
+        player_id = self.config.player_character
+        restored = self._player_saved_agent_type or "actor"
+        self.deps.character_profiles.update_field(player_id, "agent_type", restored)
+        self._player_saved_agent_type = None
+        self.state = {
+            **self.state,
+            "player": {**self.state["player"], "enabled": True},
+        }
+        self.auto_mode = False
+        self.last_handoff_reason = "自动模式已关闭：下一个玩家回合恢复等待输入。"
 
     def apply_player_action(self, raw_input: str) -> dict[str, Any]:
         with self._lock:
