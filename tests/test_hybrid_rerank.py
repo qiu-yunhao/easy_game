@@ -33,6 +33,23 @@ class RerankTest(unittest.TestCase):
         out = rerank(docs, weights=RerankWeights(relevance=0.1, recency=1.0, importance=0.0))
         self.assertEqual(out[0].doc.doc_id, "new")
 
+    def test_原始量纲因子先归一化不压垮relevance(self):
+        # 真实场景：relevance 是 RRF 分(~0.016 量级)，recency/importance 是原始
+        # turn/评分(0-12、0-5)。默认权重下，语义最相关(relevance 最高)的应排第一，
+        # 而不该被量纲更大的 importance/recency 淹没。
+        docs = [
+            _sd("relevant", relevance=1 / 61, recency=2.0, importance=3.0),
+            _sd("off_topic", relevance=1 / 62, recency=12.0, importance=5.0),
+        ]
+        out = rerank(docs)  # 默认 0.6/0.2/0.2
+        self.assertEqual(out[0].doc.doc_id, "relevant")
+
+    def test_单候选归一化不除零(self):
+        # 候选集只有一个时 max==min，归一化不应除零。
+        out = rerank([_sd("only", relevance=0.016, recency=7.0, importance=4.0)])
+        self.assertEqual(len(out), 1)
+        self.assertEqual(out[0].doc.doc_id, "only")
+
 
 if __name__ == "__main__":
     unittest.main()
