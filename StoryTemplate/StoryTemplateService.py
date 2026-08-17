@@ -47,10 +47,12 @@ class StoryTemplateService:
             )
             char_clusters = self._clustering.merge_characters(names, char_vecs)
         name_clusters = [[names[i] for i in cluster] for cluster in char_clusters]
+        # 行为样本按同一聚类分组，与 name_clusters 一一对应，保住「该角色的名字↔该角色的行为」绑定。
+        behavior_clusters = [[behaviors[i] for i in cluster] for cluster in char_clusters]
 
         # Level3 全局归并（四类各 1 次 LLM）。
         style_bible = self._extract.reduce_style(signals)
-        characters = self._extract.reduce_characters(name_clusters, behaviors)
+        characters = self._extract.reduce_characters(name_clusters, behavior_clusters)
         beats = self._extract.reduce_beats(beat_reps)
         skeleton = self._extract.reduce_skeleton(event_signals)
 

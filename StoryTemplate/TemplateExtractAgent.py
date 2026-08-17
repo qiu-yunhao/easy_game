@@ -71,12 +71,17 @@ class TemplateExtractAgent(BaseAgent):
         return result
 
     def reduce_characters(
-        self, name_clusters: list[list[str]], behaviors: list[str],
+        self, name_clusters: list[list[str]], behavior_clusters: list[list[str]],
     ) -> list[CharacterArchetype]:
+        # 名字簇与行为簇按聚类一一对应，成对喂给 LLM，保住每个角色的名字↔行为绑定。
+        clusters = [
+            {"names": names, "behaviors": behaviors}
+            for names, behaviors in zip(name_clusters, behavior_clusters)
+        ]
         raw = self.command(
             instruction=render_json_instruction(
-                "把以下角色簇（同一角色的多个名字样本）与行为样本归并成角色原型：",
-                {"name_clusters": name_clusters, "behavior_samples": behaviors},
+                "把以下角色簇（每簇含同一角色的多个名字样本与其行为样本）归并成角色原型：",
+                {"character_clusters": clusters},
             ),
             response_format=CHARACTER_ARCHETYPE_RESPONSE_SCHEMA,
         )
