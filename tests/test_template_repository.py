@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import unittest
+import uuid
 
 from db import Database
 from StoryTemplate.TemplateRepository import TemplateRepository
@@ -21,6 +22,9 @@ class RepositoryRealMysqlTests(unittest.TestCase):
         cls.repo.create_all()
 
     def _sample(self):
+        # beat_id/node_id 是全局主键（不按 template_id 隔离），真实产物用 uuid 保证唯一；
+        # 测试对持久化真库多次运行，故也用 uuid 后缀避免主键碰撞。
+        suffix = uuid.uuid4().hex[:8]
         sb = empty_style_bible()
         sb["narrative_voice"] = "第三人称"
         sb["tone_tags"] = ["古雅", "诙谐"]
@@ -31,13 +35,13 @@ class RepositoryRealMysqlTests(unittest.TestCase):
             "signature_relations": ["亦友亦敌"], "suggested_layer": "player",
         }]
         beats = [{
-            "beat_id": "b1", "label": "拜师", "tags": ["成长"], "summary": "弟子拜门",
+            "beat_id": f"b1_{suffix}", "label": "拜师", "tags": ["成长"], "summary": "弟子拜门",
             "dramatic_function": "铺垫", "reusable_conflict": "身份认同",
         }]
         skeleton = [
-            {"node_id": "n2", "order_index": 1, "title": "发展", "event_summary": "承",
+            {"node_id": f"n2_{suffix}", "order_index": 1, "title": "发展", "event_summary": "承",
              "preconditions": ["开端"], "maps_to_chapter_hint": "2"},
-            {"node_id": "n1", "order_index": 0, "title": "开端", "event_summary": "起",
+            {"node_id": f"n1_{suffix}", "order_index": 0, "title": "开端", "event_summary": "起",
              "preconditions": [], "maps_to_chapter_hint": "1"},
         ]
         return sb, chars, beats, skeleton
