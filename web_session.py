@@ -448,6 +448,29 @@ class WebGameSession:
         self.auto_mode = False
         self.last_handoff_reason = "自动模式已关闭：下一个玩家回合恢复等待输入。"
 
+    def auto_step(self, max_beats: int = 4) -> dict[str, Any]:
+        with self._lock:
+            if not self.story_initialized:
+                raise RuntimeError("请先初始化场景，再启动自动推进。")
+            if not self.auto_mode:
+                raise RuntimeError("自动模式未开启。")
+            if self.state["runtime"].get("scene_finished", False):
+                raise RuntimeError("当前场景已经结束，请重置后继续。")
+            chapter_before = str(self.state["plot"].get("chapter_id", "") or "")
+            self.state, self.last_handoff_reason = self._controller.advance(
+                self.state,
+                stop_when=never_stop,
+                max_beats=max_beats,
+                max_hops=max_beats + 8,
+                stop_on_chapter_end=True,
+            )
+            # 本批是否因跨章而停:chapter_id 变了即刚进下一章开头,前端据此暂停等确认。
+            self._last_chapter_advanced = (
+                str(self.state["plot"].get("chapter_id", "") or "") != chapter_before
+            )
+            self._maybe_index_finished_scene_unlocked()
+            return self.serialize_state()
+
     def apply_player_action(self, raw_input: str) -> dict[str, Any]:
         with self._lock:
             if not self.story_initialized:
@@ -745,6 +768,7 @@ class WebGameSession:
             "upcoming_round": runtime["turn_index"] + 1,
             "scene_finished": runtime.get("scene_finished", False),
             "chapter_finished": runtime.get("chapter_finished", False),
+            "chapter_paused": bool(getattr(self, "_last_chapter_advanced", False)) and self.auto_mode,
             "chapter_goal": plot.get("chapter_goal", ""),
             "scene_location": scene.get("location_id", ""),
             "scene_time": scene.get("time_tag", ""),
