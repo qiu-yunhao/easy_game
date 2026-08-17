@@ -84,14 +84,20 @@ class ConversationController:
         *,
         stop_when: StopCondition,
         max_hops: int = 24,
+        max_beats: int | None = None,
+        stop_on_chapter_end: bool = False,
         on_event: "Callable[[dict[str, Any]], None] | None" = None,
     ) -> tuple[dict[str, Any], str]:
         # 唯一一份推进循环。stop_when 决定何时停下交接:
         # Web 传 stop_at_player_turn,自动模式传 never_stop。
-        # 注意:never_stop 下 max_hops 是硬安全上限——若场景 NPC 回合可能超 max_hops,
-        # 自动入口须传更大的 max_hops。
+        # max_beats:推进的拍数上限(一次 resolve_story_turn = 一拍);达到即正常返回,
+        # 供自动模式逐拍推进(never_stop 下不靠 stop_when 停,靠 max_beats 分批)。
+        # stop_on_chapter_end:某拍跨了章(plot.chapter_id 变化)即正常返回,停在下一章开头,
+        # 交前端等用户确认后再续章(chapter_finished 是一拍内瞬态,故检测 chapter_id 变化)。
+        # 注意:never_stop 下 max_hops 是硬安全上限——须 >= max_beats,否则先撞 hops 抛错。
         hops = 0
         npc_acted = False
+        beats_done = 0
         while hops < max_hops:
             hops += 1
             # _ensure_prepared_turn 内联:next_act 为空则补一个回合。
@@ -116,6 +122,12 @@ class ConversationController:
                     if eligible
                     else "等待玩家定义下一步行动。"
                 )
+            chapter_before = str(state["plot"].get("chapter_id", "") or "")
             state = resolve_story_turn(state, self._deps, on_event)
             npc_acted = True
+            beats_done += 1
+            if stop_on_chapter_end and str(state["plot"].get("chapter_id", "") or "") != chapter_before:
+                return state, "本章已结束，等待确认后进入下一章。"
+            if max_beats is not None and beats_done >= max_beats:
+                return state, f"已自动推进 {beats_done} 拍。"
         raise RuntimeError("自动推进超过安全跳数，仍未到达稳定交接点。")

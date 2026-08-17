@@ -18,6 +18,7 @@ def _base_state(next_act):
         "player": {"controlled_character": "player"},
         "scene": {"on_stage": ["player", "npc_a"], "suppressed": [], "focus_character": ""},
         "runtime": {"next_act": next_act, "eligible_actors": ["player", "npc_a"], "scene_finished": False},
+        "plot": {"chapter_id": ""},
     }
 
 
@@ -134,6 +135,83 @@ class AdvanceNextActNoneTest(unittest.TestCase):
         state = _base_state(None)  # next_act=None 且 scene 未结束
         result, reason = controller.advance(state, stop_when=never_stop)
         self.assertIn("没有新的自动后续动作", reason)
+
+
+class AdvanceMaxBeatsTest(unittest.TestCase):
+    @patch("Graph.conversation_controller.is_player_turn", _fake_is_player_turn)
+    @patch("Graph.conversation_controller.prepare_chapter_turn", lambda s, d: s)
+    def test_advance_returns_after_max_beats(self):
+        calls = {"n": 0}
+
+        def _fake_resolve(state, deps, on_event=None):
+            calls["n"] += 1
+            return {**state, "runtime": {**state["runtime"], "next_act": {"actor": "npc_a"}}}
+
+        controller = ConversationController(deps=object())
+        state = _base_state({"actor": "npc_a"})
+        with patch("Graph.conversation_controller.resolve_story_turn", _fake_resolve):
+            result, reason = controller.advance(
+                state, stop_when=never_stop, max_beats=3, max_hops=24
+            )
+        self.assertEqual(calls["n"], 3)
+        self.assertIn("3 拍", reason)
+
+    @patch("Graph.conversation_controller.is_player_turn", _fake_is_player_turn)
+    @patch("Graph.conversation_controller.prepare_chapter_turn", lambda s, d: s)
+    def test_advance_max_beats_stops_early_on_scene_finished(self):
+        def _fake_resolve(state, deps, on_event=None):
+            return {**state, "runtime": {**state["runtime"], "scene_finished": True,
+                                         "scene_end_evaluation": {"reason": "剧终"}}}
+
+        controller = ConversationController(deps=object())
+        state = _base_state({"actor": "npc_a"})
+        with patch("Graph.conversation_controller.resolve_story_turn", _fake_resolve):
+            result, reason = controller.advance(
+                state, stop_when=never_stop, max_beats=5, max_hops=24
+            )
+        self.assertTrue(result["runtime"]["scene_finished"])
+        self.assertEqual(reason, "剧终")
+
+    @patch("Graph.conversation_controller.is_player_turn", _fake_is_player_turn)
+    @patch("Graph.conversation_controller.prepare_chapter_turn", lambda s, d: s)
+    def test_advance_max_beats_none_is_current_behavior(self):
+        seq = iter([{"actor": "npc_a"}, {"actor": "npc_a"}])
+
+        def _fake_resolve(state, deps, on_event=None):
+            try:
+                return {**state, "runtime": {**state["runtime"], "next_act": next(seq)}}
+            except StopIteration:
+                return {**state, "runtime": {**state["runtime"], "scene_finished": True,
+                                             "scene_end_evaluation": {"reason": "自然结束"}}}
+
+        controller = ConversationController(deps=object())
+        state = _base_state({"actor": "npc_a"})
+        with patch("Graph.conversation_controller.resolve_story_turn", _fake_resolve):
+            result, reason = controller.advance(state, stop_when=never_stop, max_hops=24)
+        self.assertTrue(result["runtime"]["scene_finished"])
+        self.assertEqual(reason, "自然结束")
+
+    @patch("Graph.conversation_controller.is_player_turn", _fake_is_player_turn)
+    @patch("Graph.conversation_controller.prepare_chapter_turn", lambda s, d: s)
+    def test_advance_stops_on_chapter_change(self):
+        seq = iter(["c1", "c2"])  # 第 2 拍把 chapter_id 从 c1 切到 c2
+
+        def _fake_resolve(state, deps, on_event=None):
+            return {
+                **state,
+                "plot": {**state["plot"], "chapter_id": next(seq)},
+                "runtime": {**state["runtime"], "next_act": {"actor": "npc_a"}},
+            }
+
+        controller = ConversationController(deps=object())
+        state = _base_state({"actor": "npc_a"})
+        state = {**state, "plot": {**state.get("plot", {}), "chapter_id": "c1"}}
+        with patch("Graph.conversation_controller.resolve_story_turn", _fake_resolve):
+            result, reason = controller.advance(
+                state, stop_when=never_stop, max_beats=8, stop_on_chapter_end=True
+            )
+        self.assertEqual(result["plot"]["chapter_id"], "c2")
+        self.assertIn("本章已结束", reason)
 
 
 if __name__ == "__main__":
