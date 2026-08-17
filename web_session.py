@@ -366,6 +366,18 @@ class WebGameSession:
             return self._export_runtime_snapshot_unlocked()
 
     def _export_runtime_snapshot_unlocked(self) -> dict[str, Any]:
+        state = _json_clone(self.state)
+        profiles = _json_clone(_profiles_as_dict(self.character_profiles))
+        if self.auto_mode:
+            # 存档只落地正常游玩态:自动模式是临时叠加,导出时把玩家角色还原为升格前的
+            # agent_type 与 enabled=True,避免存档带着"L1 化玩家 + enabled=False"的半自动态。
+            player_id = self.config.player_character
+            restored = self._player_saved_agent_type or "actor"
+            player_profile = profiles.get(player_id)
+            if isinstance(player_profile, dict):
+                player_profile["agent_type"] = restored
+            if isinstance(state.get("player"), dict):
+                state["player"]["enabled"] = True
         return {
             "session": {
                 "mode": self.config.mode,
@@ -374,8 +386,8 @@ class WebGameSession:
                 "story_initialized": self.story_initialized,
                 "last_handoff_reason": self.last_handoff_reason,
             },
-            "state": _json_clone(self.state),
-            "character_profiles": _json_clone(_profiles_as_dict(self.character_profiles)),
+            "state": state,
+            "character_profiles": profiles,
             "scene_config": _json_clone(self.scene_config),
         }
 
@@ -411,6 +423,7 @@ class WebGameSession:
         self._reload_dependencies()
         self.story_initialized = bool(session_meta.get("story_initialized", False))
         self.last_handoff_reason = str(session_meta.get("last_handoff_reason") or "已从数据库存档恢复。")
+        self._reset_auto_mode_flags_unlocked()
         return self.serialize_state()
 
     def set_auto_mode(self, enabled: bool) -> dict[str, Any]:
@@ -630,6 +643,12 @@ class WebGameSession:
             },
         }
 
+    def _reset_auto_mode_flags_unlocked(self) -> None:
+        # 会话被重建/换档时清掉自动模式的临时叠加态,避免脏标志残留到全新/载入的状态上。
+        self.auto_mode = False
+        self._player_saved_agent_type = None
+        self._last_chapter_advanced = False
+
     def _rebuild_session(self, *, initialize_story: bool = False) -> None:
         self.character_profiles = build_default_character_profiles(self.config.player_profile)
         self.scene_config = build_default_scene_config(self.config.narration_style_preset)
@@ -639,6 +658,7 @@ class WebGameSession:
         )
         self._reload_dependencies()
         self.story_initialized = False
+        self._reset_auto_mode_flags_unlocked()
         if initialize_story:
             self._initialize_story()
 

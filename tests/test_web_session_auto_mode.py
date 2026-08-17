@@ -115,5 +115,63 @@ class AutoStepTest(unittest.TestCase):
             session.auto_step()
 
 
+class ExportSnapshotDuringAutoTest(unittest.TestCase):
+    def test_export_while_auto_restores_pre_promotion_player(self):
+        # 自动模式开着时导出快照:玩家 agent_type 还原为升格前的值、player.enabled=True,
+        # 避免存档落进"L1 化玩家 + enabled=False"半自动态;但会话仍保持自动模式不变。
+        session = _session()
+        session.set_auto_mode(True)
+        snapshot = session._export_runtime_snapshot_unlocked()
+
+        exported_profile = snapshot["character_profiles"][PLAYER_CHARACTER_ID]
+        self.assertEqual(exported_profile.get("agent_type"), "actor")
+        self.assertTrue(snapshot["state"]["player"].get("enabled"))
+
+        # 会话本体仍处于自动模式的叠加态,导出不产生副作用。
+        self.assertTrue(session.auto_mode)
+        self.assertFalse(session.state["player"].get("enabled"))
+        self.assertEqual(
+            session.deps.character_profiles.get(PLAYER_CHARACTER_ID, {}).get("agent_type"),
+            "L1",
+        )
+
+    def test_export_while_not_auto_keeps_live_values(self):
+        session = _session()
+        snapshot = session._export_runtime_snapshot_unlocked()
+        self.assertEqual(
+            snapshot["character_profiles"][PLAYER_CHARACTER_ID].get("agent_type"),
+            "actor",
+        )
+        self.assertTrue(snapshot["state"]["player"].get("enabled"))
+
+
+class ResetClearsAutoFlagsTest(unittest.TestCase):
+    def test_reset_clears_auto_mode_flags(self):
+        session = _session()
+        session.set_auto_mode(True)
+        session._last_chapter_advanced = True
+        session.reset(player_profile={"name": "重开玩家"})
+        self.assertFalse(session.auto_mode)
+        self.assertIsNone(session._player_saved_agent_type)
+        self.assertFalse(session._last_chapter_advanced)
+        self.assertTrue(session.state["player"].get("enabled"))
+        self.assertEqual(
+            session.deps.character_profiles.get(PLAYER_CHARACTER_ID, {}).get("agent_type"),
+            "actor",
+        )
+
+    def test_load_snapshot_clears_auto_mode_flags(self):
+        # 先在正常态导出一份干净快照,再让会话进入自动模式并置脏标志,
+        # 载入后自动标志必须被清干净。
+        session = _session()
+        clean_snapshot = session._export_runtime_snapshot_unlocked()
+        session.set_auto_mode(True)
+        session._last_chapter_advanced = True
+        session._load_runtime_snapshot_unlocked(clean_snapshot)
+        self.assertFalse(session.auto_mode)
+        self.assertIsNone(session._player_saved_agent_type)
+        self.assertFalse(session._last_chapter_advanced)
+
+
 if __name__ == "__main__":
     unittest.main()
