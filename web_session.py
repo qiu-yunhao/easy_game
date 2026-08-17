@@ -30,6 +30,7 @@ from PlayerControl.PlayerCommandTools import (
     normalize_tool_call,
 )
 from PlayerControl.PlayerIntentPlannerAgent import build_heuristic_player_intent_plan
+from Recall.service.scene_extraction import extract_current_scene
 from ResolvedActUtils import build_resolved_act_payload
 from session_bootstrap import (
     PLAYER_CHARACTER_ID,
@@ -42,6 +43,7 @@ from session_bootstrap import (
 
 if TYPE_CHECKING:
     from Persistence.Store import GameSaveStore
+    from Recall.service.async_indexer import AsyncSceneIndexer
 
 
 TRAILING_SENTENCE_MARKS = "。！？!?…"
@@ -193,6 +195,7 @@ class WebGameSession:
         self.save_store: GameSaveStore | None = None
         self.active_user_id: int | None = None
         self.active_player_id: int | None = None
+        self._scene_indexer: "AsyncSceneIndexer | None" = None
         self.last_handoff_reason = "请先确认玩家档案，然后初始化当前场景。"
         self.story_initialized = False
         self.character_profiles: dict[str, dict[str, Any]] = {}
@@ -249,6 +252,26 @@ class WebGameSession:
 
     def _current_save_context_unlocked(self) -> dict[str, int | None]:
         return {"user_id": self.active_user_id, "player_id": self.active_player_id}
+
+    def bind_recall_indexer(self, indexer: "AsyncSceneIndexer | None") -> None:
+        """注入异步回忆索引器（可选，默认不注入）；未注入时幕结束触发静默跳过。"""
+        with self._lock:
+            self._scene_indexer = indexer
+
+    def _maybe_index_finished_scene_unlocked(self) -> None:
+        """幕刚结束时即时提取当前幕并交后台异步索引；缺依赖/上下文/幕数据则静默跳过。"""
+        if self._scene_indexer is None:
+            return
+        if not self.state["runtime"].get("scene_finished", False):
+            return
+        ctx = self._current_save_context_unlocked()
+        user_id, player_id = ctx["user_id"], ctx["player_id"]
+        if user_id is None or player_id is None:
+            return
+        scene = extract_current_scene(self.state)
+        if scene is None:
+            return
+        self._scene_indexer.enqueue(scene, user_id=user_id, player_id=player_id)
 
     def _require_save_store_unlocked(self) -> "GameSaveStore":
         if self.save_store is None:
@@ -385,6 +408,7 @@ class WebGameSession:
             self.state, self.last_handoff_reason = self._controller.advance(
                 self.state, stop_when=stop_at_player_turn
             )
+            self._maybe_index_finished_scene_unlocked()
             return self.serialize_state()
 
     def apply_player_action_streaming(
@@ -425,6 +449,7 @@ class WebGameSession:
             self.state, self.last_handoff_reason = self._controller.advance(
                 self.state, stop_when=stop_at_player_turn, on_event=_emit
             )
+            self._maybe_index_finished_scene_unlocked()
             return self.serialize_state()
 
     def _maybe_handle_player_intent_plan_unlocked(self, raw_input: str) -> dict[str, Any] | None:
@@ -475,6 +500,7 @@ class WebGameSession:
                     break
         if not executed:
             return None
+        self._maybe_index_finished_scene_unlocked()
         return self.serialize_state()
 
     def _append_tool_message_unlocked(
