@@ -44,6 +44,7 @@ from session_bootstrap import (
 if TYPE_CHECKING:
     from Persistence.Store import GameSaveStore
     from Recall.service.async_indexer import AsyncSceneIndexer
+    from Recall.service.recall_service import RecallService
 
 
 TRAILING_SENTENCE_MARKS = "。！？!?…"
@@ -196,6 +197,7 @@ class WebGameSession:
         self.active_user_id: int | None = None
         self.active_player_id: int | None = None
         self._scene_indexer: "AsyncSceneIndexer | None" = None
+        self._recall_service: "RecallService | None" = None
         self.last_handoff_reason = "请先确认玩家档案，然后初始化当前场景。"
         self.story_initialized = False
         self.character_profiles: dict[str, dict[str, Any]] = {}
@@ -257,6 +259,11 @@ class WebGameSession:
         """注入异步回忆索引器（可选，默认不注入）；未注入时幕结束触发静默跳过。"""
         with self._lock:
             self._scene_indexer = indexer
+
+    def bind_recall_service(self, service: "RecallService | None") -> None:
+        """注入回忆查询服务（可选，默认不注入）；未注入时 query_recall 工具报未启用。"""
+        with self._lock:
+            self._recall_service = service
 
     def _maybe_index_finished_scene_unlocked(self) -> None:
         """幕刚结束时即时提取当前幕并交后台异步索引；缺依赖/上下文/幕数据则静默跳过。"""
@@ -599,6 +606,7 @@ class WebGameSession:
                 user_id=user_id,
                 player_id=player_id,
             ),
+            resolve_recall_service=lambda: self._recall_service,
         )
         character_roster_tool_runtime = CharacterRosterToolRuntime(
             resolve_store=lambda: self.save_store,

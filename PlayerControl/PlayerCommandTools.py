@@ -141,6 +141,7 @@ class PlayerCommandToolRuntime:
     list_players_for_user: Callable[[int], list[dict[str, Any]]] | None = None
     save_checkpoint: Callable[[int, int, str | None], dict[str, Any]] | None = None
     load_checkpoint: Callable[[int, int], dict[str, Any]] | None = None
+    resolve_recall_service: Callable[[], Any | None] | None = None
 
     def execute(self, tool_call: dict[str, Any] | None) -> PlayerToolResult:
         normalized_call = normalize_tool_call(tool_call)
@@ -270,6 +271,36 @@ class PlayerCommandToolRuntime:
             )
         )
         return self._result(True, "query_quests", text, payload=payload)
+
+    def _query_recall(self, arguments: dict[str, Any]) -> PlayerToolResult:
+        # 触发：玩家用自然语言追问「之前经历过什么」等回忆类请求。
+        # 生命周期：只读、单次查询即返回，不改动 state。
+        query = str(arguments.get("query", "") or "").strip()
+        if not query:
+            raise ValueError("回忆查询需要提供想回忆的内容。")
+        # 边界：回忆服务为可选注入，未启用时优雅告知而非报错。
+        service = self.resolve_recall_service() if self.resolve_recall_service is not None else None
+        if service is None:
+            return self._result(False, "query_recall", "回忆功能未启用。")
+        store, user_id, player_id = self._require_active_player()
+        del store  # 回忆走独立的向量服务，不经存档存储。
+        top_k_raw = arguments.get("top_k")
+        top_k = int(top_k_raw) if isinstance(top_k_raw, int) and top_k_raw > 0 else 10
+        scored = service.query_recall(query, user_id=user_id, player_id=player_id, top_k=top_k)
+        results = [
+            {
+                "scene_id": item.doc.metadata.get("scene_id", ""),
+                "chapter_id": item.doc.metadata.get("chapter_id", ""),
+                "text": item.doc.text,
+                "score": item.score,
+            }
+            for item in scored
+        ]
+        if not results:
+            # 边界：无命中不是错误，返回成功 + 友好文案。
+            return self._result(True, "query_recall", "没有找到相关的回忆。", payload={"results": []})
+        text = "回忆到：" + _join_fragments([entry["text"] for entry in results])
+        return self._result(True, "query_recall", text, payload={"results": results})
 
     def _save_checkpoint(self, arguments: dict[str, Any]) -> PlayerToolResult:
         store, user_id, player_id = self._require_active_player()

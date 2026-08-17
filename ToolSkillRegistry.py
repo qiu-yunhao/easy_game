@@ -148,6 +148,39 @@ TOOL_SKILLS: tuple[ToolSkillDefinition, ...] = (
         ),
     ),
     ToolSkillDefinition(
+        skill_id="recall_skill",
+        file_name="recall_skill.md",
+        description="Long-term recall of past finished scenes via natural language.",
+        trigger_keywords=("回忆", "之前", "经历", "记得", "曾经", "以前", "过去", "recall", "remember", "past"),
+        audiences=("player",),
+        tools=(
+            _tool(
+                "query_recall",
+                description=(
+                    "Recall what the player has experienced in earlier finished scenes. "
+                    "Use only when the player asks about the past in natural language; "
+                    "read-only, one-shot, returns relevant past history fragments."
+                ),
+                reason="player wants to recall past experiences",
+                keywords=("回忆", "之前", "经历", "记得", "曾经", "以前", "过去", "recall", "remember", "past"),
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "query": {
+                            "type": "string",
+                            "description": "Natural-language description of what the player wants to recall.",
+                        },
+                        "top_k": {
+                            "type": "integer",
+                            "description": "Optional max number of fragments to return (default 10).",
+                        },
+                    },
+                    "required": ["query"],
+                },
+            ),
+        ),
+    ),
+    ToolSkillDefinition(
         skill_id="save_load_skill",
         file_name="save_load_skill.md",
         description="Manual save and load operations.",
