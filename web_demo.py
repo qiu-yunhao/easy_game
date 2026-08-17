@@ -53,6 +53,12 @@ def parse_args() -> argparse.Namespace:
         help="数据库连接串。推荐 MySQL DSN，例如 mysql+pymysql://user:pass@host:3306/stagebound。",
     )
     parser.add_argument(
+        "--recall-database-url",
+        default=os.getenv("STAGEBOUND_RECALL_DATABASE_URL", ""),
+        help="回忆(RAG)库连接串，需 Postgres（pgvector/pg_trgm），如 "
+        "postgresql+psycopg://user:pass@host:5432/stagebound。留空则回忆功能不启用。",
+    )
+    parser.add_argument(
         "--mode",
         choices=("heuristic", "agent-first", "live"),
         default="agent-first",
@@ -66,6 +72,29 @@ def parse_args() -> argparse.Namespace:
         help="旁白子图使用的文风预设。",
     )
     return parser.parse_args()
+
+
+def _setup_recall(session, *, save_database, recall_url: str) -> object | None:
+    """按需组装并绑定回忆栈到会话，返回已启动的索引器（未启用则 None）。
+
+    触发条件：同时具备 save 库与非空 recall 连接串。用 DataAccess 收敛多库混排
+    （存档=MySQL、回忆=Postgres），交 build_recall_stack 组装 RecallService +
+    AsyncSceneIndexer；绑定到会话后启动后台索引 worker。任何异常都不拖垮主服务，
+    降级为「回忆未启用」。返回的索引器供关闭时 stop()。
+    """
+    from db import DataAccess
+    from Recall.service import build_recall_stack
+
+    access = DataAccess(save_database=save_database, recall_url=recall_url)
+    if not access.has_recall():
+        return None
+    service, indexer = build_recall_stack(access)
+    if service is None or indexer is None:
+        return None
+    session.bind_recall_service(service)
+    session.bind_recall_indexer(indexer)
+    indexer.start()  # 启动后台 worker：幕结束入队 → 串行 embed+upsert。
+    return indexer
 
 
 def main() -> int:
@@ -86,6 +115,7 @@ def main() -> int:
         return 1
 
     save_store = None
+    save_database = None
     if str(args.database_url or "").strip():
         if GameSaveStore is None:
             missing_module = getattr(PERSISTENCE_IMPORT_ERROR, "name", "sqlalchemy")
@@ -94,7 +124,11 @@ def main() -> int:
             print("请先在当前环境安装：python -m pip install sqlalchemy pymysql", flush=True)
             return 1
         try:
-            save_store = GameSaveStore(str(args.database_url).strip())
+            from db import Database
+
+            # 显式建一个存档 Database，供 GameSaveStore 与 DataAccess 共用同一连接来源。
+            save_database = Database(str(args.database_url).strip())
+            save_store = GameSaveStore(save_database)
             save_store.create_schema()
         except ModuleNotFoundError as exc:
             print(f"Stagebound 数据库初始化失败：缺少依赖 {exc.name}", flush=True)
@@ -104,6 +138,18 @@ def main() -> int:
         except Exception as exc:
             print(f"Stagebound 数据库初始化失败：{exc}", flush=True)
             return 1
+
+    # 回忆栈：需存档库 + 非空 recall 连接串（Postgres）。启动失败仅降级，不拖垮主服务。
+    recall_indexer = None
+    recall_url = str(args.recall_database_url or "").strip()
+    if save_database is not None and recall_url:
+        try:
+            recall_indexer = _setup_recall(
+                session, save_database=save_database, recall_url=recall_url
+            )
+        except Exception as exc:
+            print(f"Stagebound 回忆功能初始化失败（已降级为未启用）：{exc}", flush=True)
+            recall_indexer = None
 
     server = web_server.StageboundHTTPServer(
         (args.host, args.port),
@@ -115,12 +161,15 @@ def main() -> int:
     print(f"运行模式：{args.mode}")
     print(f"玩家角色：{args.player_character}")
     print("数据库模式：未启用（仅内存会话）" if save_store is None else f"数据库模式：已启用 -> {args.database_url}")
+    print("回忆模式：未启用" if recall_indexer is None else f"回忆模式：已启用 -> {recall_url}")
 
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         pass
     finally:
+        if recall_indexer is not None:
+            recall_indexer.stop()  # 排空队列并停止后台 worker。
         server.server_close()
     return 0
 
