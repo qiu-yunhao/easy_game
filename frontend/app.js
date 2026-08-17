@@ -7,6 +7,8 @@ const API = {
   newGame: "/api/new-game",
   save: "/api/save",
   load: "/api/load",
+  auto: "/api/auto",
+  autoStep: "/api/auto/step",
 };
 
 const DEFAULT_SPIRITUAL_ROOT = "杂灵根";
@@ -24,6 +26,8 @@ const startSceneButton = document.getElementById("startSceneButton");
 const restartSceneButton = document.getElementById("restartSceneButton");
 const editProfileButton = document.getElementById("editProfileButton");
 const toggleBackpackButton = document.getElementById("toggleBackpackButton");
+const autoModeToggle = document.getElementById("autoModeToggle");
+const continueChapterButton = document.getElementById("continueChapterButton");
 const backpackDrawer = document.getElementById("backpackDrawer");
 const profileFlipbook = document.getElementById("profileFlipbook");
 const parserJson = document.getElementById("parserJson");
@@ -107,6 +111,9 @@ let latestJsonText = "";
 let isJsonCollapsed = false;
 let isBackpackOpen = false;
 let sidebarMode = "setup";
+let autoTimer = null;
+let autoBusy = false;
+let chapterPaused = false;
 let persistenceAvailable = null;
 let currentUser = null;
 let players = [];
@@ -1768,6 +1775,97 @@ toggleBackpackButton.addEventListener("click", () => {
   setBackpackOpen(!isBackpackOpen);
 });
 submitButton.addEventListener("click", handleSubmit);
+
+function startAutoPolling() {
+  if (autoTimer === null) {
+    autoTimer = setInterval(pollAutoStep, 1500);
+  }
+}
+
+function stopAutoPolling() {
+  if (autoTimer !== null) {
+    clearInterval(autoTimer);
+    autoTimer = null;
+  }
+}
+
+async function pollAutoStep() {
+  if (autoBusy || chapterPaused) return;
+  if (latestState?.scene_finished) {
+    stopAutoMode();
+    return;
+  }
+  autoBusy = true;
+  try {
+    const response = await fetch(API.autoStep, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ max_beats: 4 }),
+    });
+    if (!response.ok) throw new Error(`auto step failed: ${response.status}`);
+    const state = await response.json();
+    renderState(state, { jsonLabel: "自动推进返回" });
+    if (state?.scene_finished) {
+      stopAutoMode();
+    } else if (state?.chapter_paused) {
+      // 章节结束：停轮询但保持自动开关，等用户点“继续下一章”。
+      chapterPaused = true;
+      stopAutoPolling();
+      continueChapterButton.style.display = "";
+    }
+  } catch (err) {
+    console.error(err);
+    stopAutoMode();
+  } finally {
+    autoBusy = false;
+  }
+}
+
+async function startAutoMode() {
+  const response = await fetch(API.auto, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ enabled: true }),
+  });
+  if (!response.ok) {
+    autoModeToggle.checked = false;
+    return;
+  }
+  renderState(await response.json(), { jsonLabel: "自动模式开启" });
+  startAutoPolling();
+}
+
+async function stopAutoMode() {
+  stopAutoPolling();
+  chapterPaused = false;
+  continueChapterButton.style.display = "none";
+  if (autoModeToggle.checked) autoModeToggle.checked = false;
+  try {
+    const response = await fetch(API.auto, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: false }),
+    });
+    if (response.ok) renderState(await response.json(), { jsonLabel: "自动模式关闭" });
+  } catch (err) {
+    console.error(err);
+  }
+}
+
+autoModeToggle.addEventListener("change", () => {
+  if (autoModeToggle.checked) {
+    startAutoMode();
+  } else {
+    stopAutoMode();
+  }
+});
+
+continueChapterButton.addEventListener("click", () => {
+  // 用户确认续章：清暂停态、隐藏按钮、重启轮询（自动开关始终未动）。
+  chapterPaused = false;
+  continueChapterButton.style.display = "none";
+  startAutoPolling();
+});
 jsonCopyButton.addEventListener("click", copyLatestJson);
 jsonToggleButton.addEventListener("click", () => {
   setJsonCollapsed(!isJsonCollapsed);
