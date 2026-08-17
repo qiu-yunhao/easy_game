@@ -79,7 +79,11 @@ class PgTrgmSparseSearch:
         )
         if filters:
             for key, value in filters.items():
-                stmt = stmt.where(self.table.c.meta[key].astext == str(value))
+                if key == "doc_type":
+                    # doc_type 是顶层列而非 meta 键，按列等值过滤。
+                    stmt = stmt.where(self.table.c.doc_type == str(value))
+                else:
+                    stmt = stmt.where(self.table.c.meta[key].astext == str(value))
         stmt = stmt.order_by(score.desc(), self.table.c.doc_id).limit(top_k)
         with self.engine.connect() as conn:
             rows = conn.execute(stmt).mappings().all()

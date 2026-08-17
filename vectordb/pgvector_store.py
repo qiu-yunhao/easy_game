@@ -99,8 +99,12 @@ class PgVectorStore(VectorStore):
         stmt = self.table.select().add_columns(distance)
         if filters:
             for key, value in filters.items():
-                # JSONB 按键等值过滤：meta ->> key = value
-                stmt = stmt.where(self.table.c.meta[key].astext == str(value))
+                if key == "doc_type":
+                    # doc_type 是顶层列而非 meta 键，按列等值过滤。
+                    stmt = stmt.where(self.table.c.doc_type == str(value))
+                else:
+                    # 其余键按 JSONB 等值过滤：meta ->> key = value
+                    stmt = stmt.where(self.table.c.meta[key].astext == str(value))
         stmt = stmt.order_by(distance).limit(top_k)
         with self.engine.connect() as conn:
             result = conn.execute(stmt).mappings().all()

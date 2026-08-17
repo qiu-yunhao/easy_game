@@ -53,6 +53,22 @@ class PgVectorStoreTest(unittest.TestCase):
         self.assertTrue(all(h.doc.metadata.get("player_id") == 2 for h in hits))
         self.assertIn("f:2", [h.doc.doc_id for h in hits])
 
+    def test_按_doc_type_顶层列过滤(self):
+        # doc_type 是顶层列而非 metadata 键，filter 需命中列而不是 meta->>doc_type。
+        self.store.upsert(
+            [
+                (VectorDoc("dt:sum", "scene_summary", "整幕摘要", {"user_id": 7}), _vec(0.6)),
+                (VectorDoc("dt:act", "act_chunk", "行动片段", {"user_id": 7}), _vec(0.6)),
+            ]
+        )
+        hits = self.store.search(
+            _vec(0.6), top_k=10, filters={"user_id": 7, "doc_type": "scene_summary"}
+        )
+        ids = [h.doc.doc_id for h in hits]
+        self.assertIn("dt:sum", ids)
+        self.assertNotIn("dt:act", ids)  # act_chunk 应被 doc_type 过滤掉
+
+
     def test_delete_按_id_删除(self):
         self.store.upsert([(VectorDoc("del:1", "act_chunk", "d", {}), _vec(0.42))])
         self.store.delete(["del:1"])
