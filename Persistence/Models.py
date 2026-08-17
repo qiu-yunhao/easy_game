@@ -238,3 +238,29 @@ class PlayerSaveSnapshot(Base):
     )
 
     player: Mapped[PlayerSlot] = relationship(back_populates="save_snapshots")
+
+
+class RecallIndexLog(Base):
+    """回忆索引防重日志：记录「某玩家的某一幕」是否已索引进向量库。
+
+    幕结束时即时索引可能被多条路径触发（流式动作、工具动作等），且索引本身是
+    异步后台执行的，故需要一张日志表按 (player_id, scene_id) 唯一去重——索引成功
+    后才写入，失败不写，保证下次仍可重试。不建反向关系以免改动 PlayerSlot。
+    """
+
+    __tablename__ = "recall_index_log"
+
+    id: Mapped[int] = mapped_column(BIGINT_PK, primary_key=True, autoincrement=True)
+    player_id: Mapped[int] = mapped_column(
+        ForeignKey("players.id", ondelete="CASCADE"), nullable=False
+    )
+    scene_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    indexed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+
+    __table_args__ = (
+        Index("uq_recall_index_log_player_scene", "player_id", "scene_id", unique=True),
+    )

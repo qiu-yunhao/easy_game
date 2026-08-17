@@ -148,3 +148,13 @@ CREATE TABLE IF NOT EXISTS player_save_snapshots (
   KEY ix_player_save_snapshots_player_id (player_id),
   CONSTRAINT fk_player_save_snapshots_player FOREIGN KEY (player_id) REFERENCES players(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS recall_index_log (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  player_id BIGINT UNSIGNED NOT NULL,
+  scene_id VARCHAR(128) NOT NULL,
+  indexed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_recall_index_log_player_scene (player_id, scene_id),
+  CONSTRAINT fk_recall_index_log_player FOREIGN KEY (player_id) REFERENCES players(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
