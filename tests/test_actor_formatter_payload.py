@@ -209,6 +209,7 @@ class ActorFormatterPayloadTests(unittest.TestCase):
                 "next_act",
                 "recent_history",
                 "recent_short_term_memory",
+                "recalled_memories",
             ],
         )
         self.assertEqual(

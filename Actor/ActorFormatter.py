@@ -21,6 +21,20 @@ def _build_actor_runtime_prompt_state(actor_runtime: Mapping[str, Any]) -> dict[
     }
 
 
+def _format_recalled(retrieved: list[Any]) -> list[dict[str, Any]]:
+    # 把 list[ScoredDoc] 压成 prompt 友好的精简结构,口径对齐玩家工具 _query_recall。
+    results: list[dict[str, Any]] = []
+    for item in retrieved:
+        metadata = getattr(item.doc, "metadata", {}) or {}
+        results.append({
+            "scene_id": metadata.get("scene_id", ""),
+            "chapter_id": metadata.get("chapter_id", ""),
+            "text": item.doc.text,
+            "score": item.score,
+        })
+    return results
+
+
 def _build_actor_payload(
     state: GameState,
     memory_ctx: ActorMemoryContext,
@@ -71,6 +85,7 @@ def _build_actor_payload(
         "next_act": planned_act,
         "recent_history": list(memory_ctx.short_term),
         "recent_short_term_memory": actor_memory.get("short_term_memory", [])[-10:],
+        "recalled_memories": _format_recalled(list(memory_ctx.retrieved)),
     }
 
 

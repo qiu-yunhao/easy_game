@@ -251,6 +251,13 @@ class WebGameSession:
             self.save_store = save_store
         self.active_user_id = user_id
         self.active_player_id = player_id
+        self._sync_provider_tenant_unlocked()
+
+    def _sync_provider_tenant_unlocked(self) -> None:
+        # 存档切换时把当前租户推给记忆工厂,使角色对话检索命中本局回忆。
+        provider = getattr(getattr(self, "deps", None), "actor_memory_provider", None)
+        if provider is not None and hasattr(provider, "set_tenant"):
+            provider.set_tenant(user_id=self.active_user_id, player_id=self.active_player_id)
 
     def _current_save_context_unlocked(self) -> dict[str, int | None]:
         return {"user_id": self.active_user_id, "player_id": self.active_player_id}
@@ -264,6 +271,10 @@ class WebGameSession:
         """注入回忆查询服务（可选，默认不注入）；未注入时 query_recall 工具报未启用。"""
         with self._lock:
             self._recall_service = service
+            # 同步给记忆工厂,使角色说话时能语义检索本局回忆;缺 provider 时静默跳过。
+            provider = getattr(getattr(self, "deps", None), "actor_memory_provider", None)
+            if provider is not None and hasattr(provider, "recall_service"):
+                provider.recall_service = service
 
     def _maybe_index_finished_scene_unlocked(self) -> None:
         """幕刚结束时即时提取当前幕并交后台异步索引；缺依赖/上下文/幕数据则静默跳过。"""
@@ -628,6 +639,11 @@ class WebGameSession:
             warm_model_clients(self.deps.player_intent_planner_agent, self.deps.semantic_parser_agent)
         # deps 每次重建后重新构造 controller,保证其恒指向最新 deps。
         self._controller = ConversationController(self.deps)
+        # deps 重建会换出新 provider,重新把已绑定的租户与回忆服务同步过去。
+        self._sync_provider_tenant_unlocked()
+        provider = getattr(self.deps, "actor_memory_provider", None)
+        if provider is not None and hasattr(provider, "recall_service"):
+            provider.recall_service = self._recall_service
 
     def _initialize_story(self) -> None:
         if self.config.mode in {"agent-first", "live"}:

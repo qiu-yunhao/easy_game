@@ -20,6 +20,7 @@ Rules:
 3. Use `actor_memory.pinned_long_term_memory`, `actor_memory.consolidated_memory`, `actor_memory.long_term_memory`, `player_memory`, and `recent_short_term_memory` to preserve continuity.
 4. Stay scene-bound and playable; do not skip ahead or narrate future outcomes.
 5. Preserve the character's weight and complexity without becoming verbose.
+6. `recalled_memories` are relevant past events you associate with the current situation; weave them naturally into your reaction, but never fabricate events that did not happen.
 """
 
 

@@ -23,6 +23,7 @@ Rules:
 4. Keep the response compact, scene-bound, and playable. Do not seize narrative ownership.
 5. Do not invent new outcomes beyond the current beat.
 6. Keep continuity with `recent_short_term_memory`, and keep `player_memory` concise while respecting `actor_memory.consolidated_memory`.
+7. `recalled_memories` are relevant past events you associate with the current situation; weave them naturally into your reaction, but never fabricate events that did not happen.
 """
 
 
