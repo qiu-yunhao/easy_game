@@ -114,6 +114,7 @@ let sidebarMode = "setup";
 let autoTimer = null;
 let autoBusy = false;
 let chapterPaused = false;
+let autoEpoch = 0;
 let persistenceAvailable = null;
 let currentUser = null;
 let players = [];
@@ -602,6 +603,8 @@ function syncControlsFromState(state = latestState) {
   const userConnected = hasConnectedUser();
   const userSynced = isConnectedUserSynced();
   const persistenceReady = canUsePersistence();
+  // 自动模式激活期间（正在轮询或停在章节暂停点）禁用手动控件，避免玩家插入操作触发多余后端工作。
+  const autoActive = autoTimer !== null || chapterPaused;
 
   startSceneButton.textContent = storyInitialized
     ? persistenceReady
@@ -609,13 +612,13 @@ function syncControlsFromState(state = latestState) {
       : "重新开局"
     : "开局";
   restartSceneButton.textContent = persistenceReady ? "再开一局" : "重新开局";
-  submitButton.disabled = isBusy || !storyInitialized || sceneFinished || !hasDraft;
+  submitButton.disabled = isBusy || autoActive || !storyInitialized || sceneFinished || !hasDraft;
   clearButton.disabled = isBusy || !playerInput.value;
   startSceneButton.disabled = isBusy;
   restartSceneButton.disabled = isBusy;
   editProfileButton.disabled = isBusy;
   toggleBackpackButton.disabled = isBusy || !storyInitialized;
-  playerInput.disabled = isBusy || !storyInitialized || sceneFinished;
+  playerInput.disabled = isBusy || autoActive || !storyInitialized || sceneFinished;
   narrationStylePresetInput.disabled = isBusy;
   jsonCopyButton.disabled = !latestJsonText;
   saveUsernameInput.disabled = isBusy || saveUiUnavailable;
@@ -631,7 +634,7 @@ function syncControlsFromState(state = latestState) {
   });
 
   hintButtons.forEach((button) => {
-    button.disabled = isBusy || !storyInitialized || sceneFinished;
+    button.disabled = isBusy || autoActive || !storyInitialized || sceneFinished;
   });
 
   renderSaveSummary();
@@ -1822,11 +1825,13 @@ async function pollAutoStep() {
 }
 
 async function startAutoMode() {
+  const epoch = ++autoEpoch;
   const response = await fetch(API.auto, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ enabled: true }),
   });
+  if (epoch !== autoEpoch || !autoModeToggle.checked) return; // 已被后续开/关操作取代，放弃本次启动
   if (!response.ok) {
     autoModeToggle.checked = false;
     return;
@@ -1836,9 +1841,11 @@ async function startAutoMode() {
 }
 
 async function stopAutoMode() {
+  autoEpoch++;               // 使正在进行的 startAutoMode 失效，避免开关竞态遗留定时器
   stopAutoPolling();
   chapterPaused = false;
   continueChapterButton.style.display = "none";
+  syncControlsFromState();   // 关闭后立即恢复手动控件（即便下方 POST 失败）
   if (autoModeToggle.checked) autoModeToggle.checked = false;
   try {
     const response = await fetch(API.auto, {
@@ -1865,6 +1872,7 @@ continueChapterButton.addEventListener("click", () => {
   chapterPaused = false;
   continueChapterButton.style.display = "none";
   startAutoPolling();
+  syncControlsFromState();   // 续章重启轮询后立即禁用手动控件
 });
 jsonCopyButton.addEventListener("click", copyLatestJson);
 jsonToggleButton.addEventListener("click", () => {
