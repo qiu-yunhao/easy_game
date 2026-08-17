@@ -11,9 +11,13 @@ from hybrid_retrieval.rrf import rrf_fuse
 流程：query 经 embedding → 稠密 KNN；稀疏（关键词）检索 → 两路排名 RRF 融合 →
 三因子重排 → 返回 ScoredDoc。业务层只传 query + 参数，不关心内部流程。
 稀疏检索以可注入的回调声明，避免第二层绑死某个具体后端。
+
+稀疏回调可返回两种形态（向后兼容）：
+- list[str]：仅 doc_id 排名，融合时只能命中稠密已取回的文档；
+- list[ScoredDoc]：带完整文档，融合时可为「仅稀疏命中」的文档补取，不再丢弃。
 """
 
-SparseSearch = Callable[..., Sequence[str]]
+SparseSearch = Callable[..., Sequence[str] | Sequence[ScoredDoc]]
 
 
 class _Embedding(Protocol):
@@ -51,12 +55,18 @@ class HybridRetrieval:
         query_vec = self._embedding.encode([query])[0]
         dense_hits = self._vector_store.search(query_vec, top_k=fetch_k, filters=filters)
         dense_ids = [h.doc.doc_id for h in dense_hits]
-        by_id = {h.doc.doc_id: h for h in dense_hits}
+        by_id: dict[str, ScoredDoc] = {h.doc.doc_id: h for h in dense_hits}
 
-        # 2) 稀疏：关键词检索（可选）
+        # 2) 稀疏：关键词检索（可选）。回调可返回 doc_id 或完整 ScoredDoc；
+        #    若返回完整文档，则登记进 by_id，供「仅稀疏命中」的文档在融合后补取。
         sparse_ids: list[str] = []
         if self._sparse_search is not None:
-            sparse_ids = list(self._sparse_search(query, top_k=fetch_k, filters=filters))
+            for item in self._sparse_search(query, top_k=fetch_k, filters=filters):
+                if isinstance(item, ScoredDoc):
+                    sparse_ids.append(item.doc.doc_id)
+                    by_id.setdefault(item.doc.doc_id, item)
+                else:
+                    sparse_ids.append(item)
 
         # 3) RRF 融合两路排名
         fused = rrf_fuse([dense_ids, sparse_ids], k=60)
@@ -66,7 +76,7 @@ class HybridRetrieval:
         for doc_id, rrf_score in fused:
             hit = by_id.get(doc_id)
             if hit is None:
-                continue  # 仅稀疏命中、稠密未取回的文档本轮跳过（细化留后续）
+                continue  # 仅稀疏命中且稀疏未带回文档实体：无法 hydrate，跳过。
             importance = float(hit.doc.metadata.get("importance", 0.0) or 0.0)
             recency = float(hit.doc.metadata.get("recency", 0.0) or 0.0)
             candidates.append(

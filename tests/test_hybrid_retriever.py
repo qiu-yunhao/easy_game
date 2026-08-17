@@ -34,6 +34,14 @@ def _fake_sparse(query, *, top_k, filters=None):
     return ["b", "a"]
 
 
+def _fake_sparse_with_extra(query, *, top_k, filters=None):
+    # 返回完整 ScoredDoc，其中 "c" 是稠密未取回、仅稀疏命中的文档。
+    return [
+        ScoredDoc(VectorDoc("c", "act_chunk", "丙", {"importance": 0.5}), 0.8),
+        ScoredDoc(VectorDoc("a", "act_chunk", "甲", {"importance": 0.9}), 0.7),
+    ]
+
+
 class HybridRetrieverTest(unittest.TestCase):
     def setUp(self):
         self.retr = HybridRetrieval(
@@ -55,6 +63,17 @@ class HybridRetrieverTest(unittest.TestCase):
         )
         # importance 权重独大时，metadata.importance 高的 a 排第一
         self.assertEqual(out[0].doc.doc_id, "a")
+
+    def test_仅稀疏命中的文档也进入候选(self):
+        # 稀疏返回完整 ScoredDoc，其中 c 稠密未取回；修复后应能凭稀疏结果补取。
+        retr = HybridRetrieval(
+            embedding=_FakeEmbedding(),
+            vector_store=_FakeVectorStore(),
+            sparse_search=_fake_sparse_with_extra,
+        )
+        out = retr.search("丙在哪", top_k=10)
+        ids = {x.doc.doc_id for x in out}
+        self.assertIn("c", ids)
 
 
 if __name__ == "__main__":
