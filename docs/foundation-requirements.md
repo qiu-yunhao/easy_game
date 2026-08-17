@@ -87,3 +87,18 @@ python3 -c "from env_bootstrap import ensure_environment; print(ensure_environme
 pip install pymysql
 mysql -u root -e "CREATE DATABASE IF NOT EXISTS easygame_test CHARACTER SET utf8mb4;"
 ```
+
+### 章节情节提取运行入口（通用，任意小说）
+
+导入任意一部中文小说，提炼 4 类共享模板 + 原文向量片段：
+
+```bash
+HF_ENDPOINT=https://hf-mirror.com python3 scripts/extract_novel_template.py \
+  --path docs/鹿鼎记.txt --title 鹿鼎记 --max-chunks 3
+```
+
+`--max-chunks 0` 提取全文（真 DeepSeek 调用量大、耗时长）；换书只改 `--path/--title`。
+模板为**全局共享**资产（`--user-id` 仅作归属标记，只存不过滤）。结果落 MySQL 4 表
+（`story_template` / `template_style_bible` / `template_character` /
+`template_plot_beat` / `template_plot_skeleton`）+ pgvector（`style_passage` 片段，
+按 `tmpl:{tid}:` 前缀隔离多模板）。
