@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 
 from datatypes import ScoredDoc, VectorDoc
-from datatypes.tenancy import template_prefix, tenant_prefix
+from datatypes.tenancy import template_prefix, template_scope_prefix, tenant_prefix
 
 
 class TenancyTest(unittest.TestCase):
@@ -12,6 +12,9 @@ class TenancyTest(unittest.TestCase):
 
     def test_template_prefix_在租户前追加模板段(self):
         self.assertEqual(template_prefix(7, 1, 2), "tmpl:7:u1:p2:")
+
+    def test_template_scope_prefix_只按模板隔离不带租户(self):
+        self.assertEqual(template_scope_prefix(7), "tmpl:7:")
 
 
 class VectorDocTest(unittest.TestCase):

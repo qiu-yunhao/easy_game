@@ -16,3 +16,12 @@ def tenant_prefix(user_id: int, player_id: int) -> str:
 def template_prefix(template_id: int, user_id: int, player_id: int) -> str:
     """模板层在租户前缀前再加 ``tmpl:{template_id}:`` 段，隔离多模板。"""
     return f"tmpl:{template_id}:{tenant_prefix(user_id, player_id)}"
+
+
+def template_scope_prefix(template_id: int) -> str:
+    """全局共享模板的向量前缀 ``tmpl:{template_id}:``（不带 user/player）。
+
+    情节模板是平台级共享资产，所有游戏/存档均可选用，与 per-player 回忆租户
+    解耦，故只按 template_id 隔离多模板，不叠加 user/player 前缀。
+    """
+    return f"tmpl:{template_id}:"
