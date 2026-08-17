@@ -172,6 +172,17 @@ class StageboundRequestHandler(BaseHTTPRequestHandler):
             return HTTPStatus.OK, {"user": user}
         if path == "/api/action":
             return HTTPStatus.OK, self.server.session.apply_player_action(str(payload.get("input", "")))
+        if path == "/api/auto":
+            enabled = bool(payload.get("enabled", False))
+            return HTTPStatus.OK, self.server.session.set_auto_mode(enabled)
+        if path == "/api/auto/step":
+            raw_beats = payload.get("max_beats", 4)
+            try:
+                max_beats = int(raw_beats)
+            except (TypeError, ValueError):
+                raise RuntimeError("`max_beats` 必须是整数。") from None
+            max_beats = max(1, min(8, max_beats))
+            return HTTPStatus.OK, self.server.session.auto_step(max_beats=max_beats)
         if path == "/api/reset":
             return HTTPStatus.OK, self.server.session.reset(**self._build_reset_kwargs(payload))
         if path == "/api/new-game":
