@@ -277,7 +277,7 @@ def apply_selected_template(state: GameState, template_id: object) -> GameState:
         tid = int(template_id)
     except (TypeError, ValueError):
         tid = 0
-    if tid < 0:
+    if tid <= 0:
         tid = 0
     return {
         **state,
