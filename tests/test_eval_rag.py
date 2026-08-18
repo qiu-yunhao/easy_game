@@ -10,6 +10,9 @@ from eval_rag.retrieval_metrics import context_precision, context_recall
 from eval_rag.qa_generator import RecallQAGenerator
 from eval_rag.generation_metrics import GenerationJudge
 
+from datatypes import ScoredDoc, VectorDoc
+from eval_rag.runner import RecallEvaluator
+
 
 class DatasetContractTests(unittest.TestCase):
     def test_gold_doc_id_对齐_scene_indexer_格式(self):
@@ -111,6 +114,48 @@ class GenerationMetricsTests(unittest.TestCase):
         agent = _ScriptedJudge({"score": 0.5})
         GenerationJudge(agent=agent).faithfulness("a", ["c"])
         self.assertEqual(agent.calls[0][1], "json")  # response_format
+
+
+class _FakeRecall:
+    def __init__(self, mapping):
+        self._mapping = mapping
+        self.indexed = []
+    def index_completed_scenes(self, scenes, *, user_id, player_id, chunk_size=4):
+        self.indexed.append((list(scenes), user_id, player_id))
+    def query_recall(self, query, *, user_id, player_id, top_k=10, coarse_k=5):
+        return self._mapping.get(query, [])
+
+
+def _sd(doc_id, text, score):
+    return ScoredDoc(doc=VectorDoc(doc_id=doc_id, doc_type="act_chunk", text=text, metadata={}),
+                     score=score, factors={})
+
+
+class RunnerTests(unittest.TestCase):
+    def test_端到端评分与汇总_全fake(self):
+        q = "我在客栈遇到了什么?"
+        recall = _FakeRecall({q: [_sd("g1", "甲遇袭受伤", 0.9), _sd("x1", "无关", 0.5)]})
+        class _QA:
+            def answer(self, question, contexts): return "你在客栈遇袭"
+        class _J:
+            def faithfulness(self, a, c): return 1.0
+            def answer_relevancy(self, question, a): return 0.9
+        ev = RecallEvaluator(recall_service=recall, qa_generator=_QA(), judge=_J())
+        samples = [EvalSample(question=q, gold_answer="遇袭", gold_doc_ids=["g1"], scene_id="s1")]
+        report = ev.evaluate(samples, top_k=10, with_generation=True)
+        r = report.samples[0]
+        self.assertAlmostEqual(r.context_precision, 0.5)
+        self.assertAlmostEqual(r.context_recall, 1.0)
+        self.assertAlmostEqual(r.faithfulness, 1.0)
+        self.assertAlmostEqual(r.answer_relevancy, 0.9)
+        self.assertAlmostEqual(report.mean_context_recall, 1.0)
+
+    def test_关闭生成时跳过llm指标(self):
+        recall = _FakeRecall({"q": [_sd("g1", "t", 0.9)]})
+        ev = RecallEvaluator(recall_service=recall, qa_generator=None, judge=None)
+        samples = [EvalSample(question="q", gold_answer="a", gold_doc_ids=["g1"], scene_id="s1")]
+        report = ev.evaluate(samples, top_k=10, with_generation=False)
+        self.assertIsNone(report.samples[0].faithfulness)
 
 
 if __name__ == "__main__":
