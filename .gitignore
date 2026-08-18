@@ -4,3 +4,6 @@
 __pycache__/
 *.py[cod]
 tests/_cleanup_reports/
+
+# superpowers brainstorm scratch
+.superpowers/
