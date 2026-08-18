@@ -147,6 +147,12 @@ class ChapterInjectionTests(unittest.TestCase):
         self.assertEqual(service.skeleton_calls, 1)
         self.assertNotIn("reference_skeleton", instruction)
 
+    def test_malformed_tid_degrades(self):
+        service = _FakeService(nodes=_SKELETON_NODES)
+        instruction, service = self._run("not-a-number", service)
+        self.assertNotIn("reference_skeleton", instruction)
+        self.assertEqual(service.skeleton_calls, 0)
+
 
 class SceneInjectionTests(unittest.TestCase):
     def _state(self, template_id):

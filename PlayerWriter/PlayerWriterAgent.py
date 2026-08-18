@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any, Callable, Literal
 
 from BaseAgent import AgentMessage, BaseAgent
 from CharacterProfile import CharacterProfile
@@ -82,16 +82,19 @@ class PlaywrightAgent(BaseAgent):
         history: list[AgentMessage] | None,
         template_service,
         *,
-        layer: str,
+        layer: Literal["chapter", "scene"],
     ) -> str:
         """检索选定情节模板并格式化为软指导；任何缺失/故障静默降级为空串。
 
-        service 缺失或 selected_template_id<=0 时跳过；检索抛异常时记日志、返回 ""，
-        绝不阻断规划——空串会让 formatter 不加 reference_* 字段，逐字节退化为纯 LLM。
+        service 缺失或 selected_template_id<=0（含非法值）时跳过；检索抛异常时记日志、
+        返回 ""，绝不阻断规划——空串会让 formatter 不加 reference_* 字段，逐字节退化为纯 LLM。
         """
         if template_service is None:
             return ""
-        template_id = int(game_state["plot"].get("selected_template_id", 0) or 0)
+        try:
+            template_id = int(game_state["plot"].get("selected_template_id", 0) or 0)
+        except (TypeError, ValueError):
+            return ""
         if template_id <= 0:
             return ""
         query = build_template_query(game_state, history)
