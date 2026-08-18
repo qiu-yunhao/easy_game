@@ -58,6 +58,7 @@ class RecallService:
         user_id: int,
         player_id: int,
         chunk_size: int = 4,
+        step: int | None = None,
     ) -> None:
         """把一批已结束的幕批量索引进向量库。
 
@@ -65,6 +66,9 @@ class RecallService:
         build_scene_docs 生成双粒度 VectorDoc，汇总后一次性 embed 并 upsert；
         doc_id 带租户前缀且稳定，重复索引同一幕不会产生重复行（幂等）。
         空输入直接返回，不触发无谓的编码与写库。
+
+        step 透传给 build_scene_docs：默认(None)act_chunk 不重叠；传入更小的 step
+        可让行动片段滑动重叠。注意重叠模式下 doc_id 编号规则不同，与非重叠索引不可混存。
         """
         docs: list[VectorDoc] = []
         for scene in scenes:
@@ -77,6 +81,7 @@ class RecallService:
                     user_id=user_id,
                     player_id=player_id,
                     chunk_size=chunk_size,
+                    step=step,
                 )
             )
         if not docs:

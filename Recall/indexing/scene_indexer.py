@@ -183,11 +183,15 @@ def build_scene_docs(
     user_id: int,
     player_id: int,
     chunk_size: int = 4,
+    step: int | None = None,
 ) -> list[VectorDoc]:
     """索引层对外主入口：把一整幕转换为双粒度回忆文档集合。
 
     组合「整幕摘要」与若干「行动片段」两类文档，统一挂上场景元数据，供上层一次性
     向量化并写入存储。摘要为空时会被跳过，此时返回列表仅含行动片段文档。
+
+    step 透传给 build_act_chunk_docs：默认(None)act_chunk 不重叠；传入更小的 step
+    可让行动片段滑动重叠，减少跨块语义割裂。
     """
     summary_doc = build_scene_summary_doc(
         scene_memory,
@@ -203,6 +207,7 @@ def build_scene_docs(
         user_id=user_id,
         player_id=player_id,
         chunk_size=chunk_size,
+        step=step,
     )
     if summary_doc is None:
         return list(chunk_docs)

@@ -362,5 +362,29 @@ class BuildSceneDocsTests(unittest.TestCase):
         self.assertTrue(all(t == "act_chunk" for t in types))
 
 
+class BuildSceneDocsStepTests(unittest.TestCase):
+    def test_step透传产生重叠act_chunk(self):
+        docs = build_scene_docs(
+            history=_history(1, 8),
+            scene_memory=_scene_memory(),
+            scene_id="s1", chapter_id="c1", user_id=7, player_id=3,
+            chunk_size=4, step=2,
+        )
+        act = [d for d in docs if d.doc_type == "act_chunk"]
+        self.assertEqual(len(act), 3)  # step2 重叠：[1-4],[3-6],[5-8]
+        self.assertEqual(
+            (act[1].metadata["turn_start"], act[1].metadata["turn_end"]), (3, 6))
+
+    def test_默认step保持非重叠(self):
+        docs = build_scene_docs(
+            history=_history(1, 8),
+            scene_memory=_scene_memory(),
+            scene_id="s1", chapter_id="c1", user_id=7, player_id=3,
+            chunk_size=4,
+        )
+        act = [d for d in docs if d.doc_type == "act_chunk"]
+        self.assertEqual(len(act), 2)  # 非重叠：[1-4],[5-8]
+
+
 if __name__ == "__main__":
     unittest.main()
