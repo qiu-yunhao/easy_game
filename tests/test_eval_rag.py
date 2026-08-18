@@ -8,6 +8,7 @@ from eval_rag.dataset import (
 )
 from eval_rag.retrieval_metrics import context_precision, context_recall
 from eval_rag.qa_generator import RecallQAGenerator
+from eval_rag.generation_metrics import GenerationJudge
 
 
 class DatasetContractTests(unittest.TestCase):
@@ -78,6 +79,38 @@ class QAGeneratorTests(unittest.TestCase):
         out = RecallQAGenerator(agent=agent).answer("随便问", [])
         self.assertIn("未检索到", out)
         self.assertIsNone(agent.last_instruction)  # 未触发 LLM
+
+
+class _ScriptedJudge:
+    def __init__(self, payload):
+        self._payload = payload
+        self.calls = []
+    def command(self, instruction, history=None, response_format=None):
+        self.calls.append((instruction, response_format))
+        return self._payload
+
+
+class GenerationMetricsTests(unittest.TestCase):
+    def test_faithfulness_读取裁判分数(self):
+        s = GenerationJudge(agent=_ScriptedJudge({"score": 0.9, "reason": "均有据"})).faithfulness(
+            "甲受伤了", ["甲在客栈遇袭受伤"])
+        self.assertAlmostEqual(s, 0.9)
+
+    def test_answer_relevancy_读取裁判分数(self):
+        s = GenerationJudge(agent=_ScriptedJudge({"score": 0.8, "reason": "切题"})).answer_relevancy(
+            "我遇到了什么?", "你在客栈遇袭")
+        self.assertAlmostEqual(s, 0.8)
+
+    def test_裁判返回缺score时降级为0(self):
+        self.assertEqual(GenerationJudge(agent=_ScriptedJudge({"没有score": 1})).faithfulness("x", ["y"]), 0.0)
+
+    def test_分数裁剪到0_1(self):
+        self.assertEqual(GenerationJudge(agent=_ScriptedJudge({"score": 1.5})).answer_relevancy("q", "a"), 1.0)
+
+    def test_请求json格式(self):
+        agent = _ScriptedJudge({"score": 0.5})
+        GenerationJudge(agent=agent).faithfulness("a", ["c"])
+        self.assertEqual(agent.calls[0][1], "json")  # response_format
 
 
 if __name__ == "__main__":
