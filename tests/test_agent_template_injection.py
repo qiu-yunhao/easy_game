@@ -141,6 +141,12 @@ class ChapterInjectionTests(unittest.TestCase):
         self.assertNotIn("reference_skeleton", instruction)
         self.assertEqual(service.skeleton_calls, 1)
 
+    def test_empty_retrieval_degrades(self):
+        service = _FakeService()
+        instruction, service = self._run(7, service)
+        self.assertEqual(service.skeleton_calls, 1)
+        self.assertNotIn("reference_skeleton", instruction)
+
 
 class SceneInjectionTests(unittest.TestCase):
     def _state(self, template_id):
@@ -191,6 +197,12 @@ class SceneInjectionTests(unittest.TestCase):
         instruction, service = self._run(7, service)
         self.assertNotIn("reference_beats", instruction)
         self.assertEqual(service.beat_calls, 1)
+
+    def test_empty_retrieval_degrades(self):
+        service = _FakeService()
+        instruction, service = self._run(7, service)
+        self.assertEqual(service.beat_calls, 1)
+        self.assertNotIn("reference_beats", instruction)
 
 
 if __name__ == "__main__":
