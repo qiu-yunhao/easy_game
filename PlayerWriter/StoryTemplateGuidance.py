@@ -36,8 +36,34 @@ def build_template_query(state: dict[str, Any], history: list[dict] | None) -> s
 
 
 def format_skeleton_guidance(nodes: list[dict]) -> str:
-    return ""  # 见 Task 2
+    if not nodes:
+        return ""
+    lines = ["以下是可参考的情节骨架走向（软指导，可借鉴亦可偏离，不必严格遵循）："]
+    for node in nodes:
+        title = str(node.get("title", "") or "").strip()
+        summary = str(node.get("event_summary", "") or "").strip()
+        if not title and not summary:
+            continue
+        lines.append(f"- {title}：{summary}" if title else f"- {summary}")
+    if len(lines) == 1:
+        return ""
+    return "\n".join(lines)
 
 
 def format_beat_guidance(beats: list[dict]) -> str:
-    return ""  # 见 Task 2
+    if not beats:
+        return ""
+    lines = ["以下是可参考的桥段素材（作场景候选灵感参考，可借鉴亦可偏离，不必照搬）："]
+    for beat in beats:
+        label = str(beat.get("label", "") or "").strip()
+        summary = str(beat.get("summary", "") or "").strip()
+        function = str(beat.get("dramatic_function", "") or "").strip()
+        if not label and not summary:
+            continue
+        segment = f"- {label}：{summary}" if label else f"- {summary}"
+        if function:
+            segment += f"（戏剧功能：{function}）"
+        lines.append(segment)
+    if len(lines) == 1:
+        return ""
+    return "\n".join(lines)
