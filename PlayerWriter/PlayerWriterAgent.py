@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING, Any, Callable
 
 from BaseAgent import AgentMessage, BaseAgent
@@ -13,10 +14,18 @@ from PlayerWriter.PlaywriterSchema import (
     STORY_PREMISE_RESPONSE_SCHEMA,
 )
 from PlayerWriter.PlayerWriterFormatter import PlaywrightFormatter
+from PlayerWriter.StoryTemplateGuidance import (
+    build_template_query,
+    format_beat_guidance,
+    format_skeleton_guidance,
+)
 from SceneConfig import SceneConfig
 
 if TYPE_CHECKING:
     from ComponentFactory import ComponentFactory
+
+
+logger = logging.getLogger(__name__)
 
 
 PLAYWRIGHT_SYSTEM_PROMPT = """
@@ -66,6 +75,35 @@ class PlaywrightAgent(BaseAgent):
         tool_runtime: CharacterRosterToolRuntime | None,
     ) -> None:
         self.character_roster_tool_runtime = tool_runtime
+
+    def _resolve_template_guidance(
+        self,
+        game_state: GameState,
+        history: list[AgentMessage] | None,
+        template_service,
+        *,
+        layer: str,
+    ) -> str:
+        """检索选定情节模板并格式化为软指导；任何缺失/故障静默降级为空串。
+
+        service 缺失或 selected_template_id<=0 时跳过；检索抛异常时记日志、返回 ""，
+        绝不阻断规划——空串会让 formatter 不加 reference_* 字段，逐字节退化为纯 LLM。
+        """
+        if template_service is None:
+            return ""
+        template_id = int(game_state["plot"].get("selected_template_id", 0) or 0)
+        if template_id <= 0:
+            return ""
+        query = build_template_query(game_state, history)
+        try:
+            if layer == "chapter":
+                nodes = template_service.next_skeleton_nodes(template_id, chapter_hint=query)
+                return format_skeleton_guidance(nodes)
+            beats = template_service.suggest_plot_beats(template_id, query=query, top_k=5)
+            return format_beat_guidance(beats)
+        except Exception:
+            logger.exception("story template retrieval failed; degrading to pure LLM planning")
+            return ""
 
     def _execute_with_retry(
         self,
@@ -261,6 +299,7 @@ class PlaywrightAgent(BaseAgent):
         scene_config: SceneConfig,
         character_profiles: dict[str, CharacterProfile],
         history: list[AgentMessage] | None = None,
+        template_service=None,
     ) -> dict[str, Any]:
         current_outline = next(
             (
@@ -271,11 +310,15 @@ class PlaywrightAgent(BaseAgent):
             ),
             {},
         )
+        template_guidance = self._resolve_template_guidance(
+            game_state, history, template_service, layer="chapter"
+        )
         instruction = self.formatter.build_chapter_expansion_instruction(
             game_state=game_state,
             scene_config=scene_config,
             character_profiles=character_profiles,
             character_roster_tool_runtime=self.character_roster_tool_runtime,
+            template_guidance=template_guidance,
         )
         return self._execute_with_retry(
             instruction=instruction,
@@ -302,12 +345,17 @@ class PlaywrightAgent(BaseAgent):
         scene_config: SceneConfig,
         character_profiles: dict[str, CharacterProfile],
         history: list[AgentMessage] | None = None,
+        template_service=None,
     ) -> list[SceneCandidate]:
+        template_guidance = self._resolve_template_guidance(
+            game_state, history, template_service, layer="scene"
+        )
         instruction = self.formatter.build_scene_candidates_instruction(
             game_state=game_state,
             scene_config=scene_config,
             character_profiles=character_profiles,
             character_roster_tool_runtime=self.character_roster_tool_runtime,
+            template_guidance=template_guidance,
         )
         return self._execute_with_retry(
             instruction=instruction,
