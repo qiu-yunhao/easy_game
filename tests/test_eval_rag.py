@@ -6,6 +6,7 @@ from eval_rag.dataset import (
     EVAL_PLAYER_ID, EVAL_USER_ID, EvalSample, EvalScene,
     build_samples, build_scenes, gold_doc_id,
 )
+from eval_rag.retrieval_metrics import context_precision, context_recall
 
 
 class DatasetContractTests(unittest.TestCase):
@@ -36,6 +37,23 @@ class DatasetContractTests(unittest.TestCase):
             for did in smp.gold_doc_ids:
                 idx = int(did.rsplit(":", 1)[1])  # gold 引用的 act_chunk index 不得越界
                 self.assertLessEqual(idx, max_chunk)
+
+
+class RetrievalMetricsTests(unittest.TestCase):
+    def test_precision_命中占召回比例(self):
+        self.assertAlmostEqual(context_precision(["a", "b", "c", "d"], ["b", "d", "x"]), 0.5)
+
+    def test_recall_必需信息覆盖比例(self):
+        self.assertAlmostEqual(context_recall(["a", "b", "d"], ["b", "d", "x"]), 2 / 3)
+
+    def test_召回为空_precision_为0(self):
+        self.assertEqual(context_precision([], ["a"]), 0.0)
+
+    def test_gold_为空_recall_为1(self):
+        self.assertEqual(context_recall(["a"], []), 1.0)
+
+    def test_重复召回同一id只算一次(self):
+        self.assertAlmostEqual(context_precision(["a", "a", "b"], ["a"]), 0.5)
 
 
 if __name__ == "__main__":
