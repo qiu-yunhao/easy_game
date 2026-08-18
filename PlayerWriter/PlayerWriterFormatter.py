@@ -440,6 +440,7 @@ class PlaywrightFormatter:
         character_profiles: dict[str, "CharacterProfile"],
         character_roster_snapshot: Mapping[str, Any] | None = None,
         character_roster_tool_runtime: "CharacterRosterToolRuntime | None" = None,
+        template_guidance: str = "",
     ) -> str:
         player_id, player_profile = _resolve_player_profile(game_state, character_profiles)
         current_outline = _resolve_current_outline_chapter(game_state)
@@ -510,6 +511,8 @@ class PlaywrightFormatter:
             },
             "scene_config": scene_config,
         }
+        if template_guidance:
+            payload["reference_skeleton"] = template_guidance
         return render_json_instruction(
             "Expand the current chapter as strict JSON. "
             "Keep the chapter overview concise, use the chapter cast when relevant, and return 2-4 exploration hooks plus 2-4 key locations. "
@@ -542,6 +545,7 @@ class PlaywrightFormatter:
         character_profiles: dict[str, "CharacterProfile"],
         character_roster_snapshot: Mapping[str, Any] | None = None,
         character_roster_tool_runtime: "CharacterRosterToolRuntime | None" = None,
+        template_guidance: str = "",
     ) -> str:
         current_outline_chapter = _resolve_current_outline_chapter(game_state)
         completed_chapters = _serialize_completed_chapters(game_state)
@@ -625,6 +629,8 @@ class PlaywrightFormatter:
             "characters_on_stage": character_blocks,
             "recent_history": game_state["history"][-4:],
         }
+        if template_guidance:
+            payload["reference_beats"] = template_guidance
         return render_json_instruction(
             "Generate scene candidates as strict JSON. "
             "Return 2 or 3 concise candidates. Each candidate should define a concrete location, beat, "
