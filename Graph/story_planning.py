@@ -289,6 +289,7 @@ def _ensure_chapter_expansion(
                 game_state=state,
                 scene_config=deps.scene_config,
                 character_profiles=deps.character_profiles,
+                template_service=deps.story_template_service,
             )
         except RuntimeError:
             chapter_expansion = build_heuristic_chapter_expansion(
@@ -339,6 +340,7 @@ def _ensure_scene_candidates(
                 game_state=state,
                 scene_config=deps.scene_config,
                 character_profiles=deps.character_profiles,
+                template_service=deps.story_template_service,
             )
         except RuntimeError:
             candidates = build_heuristic_scene_candidates(

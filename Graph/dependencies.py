@@ -26,6 +26,7 @@ if TYPE_CHECKING:
     from PlayerControl.PlayerIntentPlannerAgent import PlayerIntentPlannerAgent
     from PlayerControl.PlayerCommandTools import PlayerCommandToolRuntime
     from Memory.provider import ActorMemoryProvider
+    from StoryTemplate.StoryTemplateService import StoryTemplateService
 
 
 @dataclass(slots=True)
@@ -55,6 +56,7 @@ class GraphDependencies:
     beat_execution_subgraph: Callable[[GameState], GameState] | None = None
     # 只读记忆工厂:Actor 读路径由它 build(actor_id, state) 出 memory_ctx。
     actor_memory_provider: "ActorMemoryProvider | None" = None
+    story_template_service: "StoryTemplateService | None" = None
     hook_registry: HookRegistry = field(default_factory=HookRegistry)
 
     def __post_init__(self) -> None:
