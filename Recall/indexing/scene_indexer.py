@@ -113,6 +113,7 @@ def build_act_chunk_docs(
     user_id: int,
     player_id: int,
     chunk_size: int = 4,
+    step: int | None = None,
 ) -> list[VectorDoc]:
     """把一整幕的历史记录按固定条数切块，产出「行动片段」粒度的回忆文档。
 
@@ -123,11 +124,21 @@ def build_act_chunk_docs(
     正文按「角色: content」逐行拼接。只取 content 而不额外拼 spoken_text /
     nonverbal_action：content 是引擎内公认的完整文本表示（History 压缩逻辑也仅依赖
     它），另拼会与 content 内容重复。历史为空时返回空列表。
+
+    step 为滑动步长：默认(None)等于 chunk_size，即相邻块不重叠(历史行为)；step <
+    chunk_size 时相邻块共享 chunk_size-step 条 history，让跨块的连续/双向语义被同一
+    窗口完整覆盖，减少边界割裂导致的回忆漏召。doc_id 用窗口顺序号，重叠下不碰撞；
+    末尾内容已被前一窗口完全覆盖的子集窗口不再产出，避免冗余块。
     """
     size = max(1, int(chunk_size))
+    stride = max(1, int(step)) if step is not None else size
+    n = len(history)
     docs: list[VectorDoc] = []
-    for index in range(0, len(history), size):
+    seq = 0
+    for index in range(0, n, stride):
         chunk = history[index : index + size]
+        if not chunk:
+            break
         turns = [int(item.get("turn", 0) or 0) for item in chunk]
         scores = [
             float(item.get("importance_score", 0.0) or 0.0)
@@ -143,7 +154,7 @@ def build_act_chunk_docs(
         turn_end = max(turns) if turns else 0
         docs.append(
             VectorDoc(
-                doc_id=f"{tenant_prefix(user_id, player_id)}{scene_id}:act_chunk:{index // size}",
+                doc_id=f"{tenant_prefix(user_id, player_id)}{scene_id}:act_chunk:{seq}",
                 doc_type="act_chunk",
                 text=text,
                 metadata=_build_metadata(
@@ -157,6 +168,9 @@ def build_act_chunk_docs(
                 ),
             )
         )
+        seq += 1
+        if index + size >= n:
+            break  # 已覆盖到末尾，后续起点只会产出被本窗口包含的子集
     return docs
 
 

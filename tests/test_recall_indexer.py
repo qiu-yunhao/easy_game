@@ -275,6 +275,48 @@ class BuildActChunkDocsTests(unittest.TestCase):
         self.assertEqual(len({d.doc_id for d in first}), len(first))
 
 
+class BuildActChunkDocsSlidingWindowTests(unittest.TestCase):
+    def _kw(self):
+        return dict(scene_id="s1", chapter_id="c1", user_id=7, player_id=3)
+
+    def test_默认不传step时与非重叠行为一致(self):
+        base = build_act_chunk_docs(_history(1, 10), chunk_size=4, **self._kw())
+        self.assertEqual(len(base), 3)  # 4+4+2，与旧非重叠一致
+        self.assertEqual(
+            (base[1].metadata["turn_start"], base[1].metadata["turn_end"]), (5, 8))
+
+    def test_step2_size4_相邻块共享两条history(self):
+        docs = build_act_chunk_docs(_history(1, 8), chunk_size=4, step=2, **self._kw())
+        # 起点 0,2,4 → 窗口 [1-4],[3-6],[5-8]；末窗到达末尾即止
+        self.assertEqual(len(docs), 3)
+        self.assertEqual(
+            (docs[0].metadata["turn_start"], docs[0].metadata["turn_end"]), (1, 4))
+        self.assertEqual(
+            (docs[1].metadata["turn_start"], docs[1].metadata["turn_end"]), (3, 6))
+        self.assertEqual(
+            (docs[2].metadata["turn_start"], docs[2].metadata["turn_end"]), (5, 8))
+
+    def test_重叠下doc_id仍唯一且为窗口顺序号(self):
+        docs = build_act_chunk_docs(_history(1, 8), chunk_size=4, step=2, **self._kw())
+        ids = [d.doc_id for d in docs]
+        self.assertEqual(len(set(ids)), len(ids))  # 无碰撞
+        self.assertEqual(ids[0].rsplit(":", 1)[1], "0")
+        self.assertEqual(ids[2].rsplit(":", 1)[1], "2")
+
+    def test_末尾子集窗口不产出冗余块(self):
+        # n=6,size4,step2：起点0→[1-4],2→[3-6]；起点4→[5-6]⊂[3-6] 应被抑制
+        docs = build_act_chunk_docs(_history(1, 6), chunk_size=4, step=2, **self._kw())
+        self.assertEqual(len(docs), 2)
+        self.assertEqual(
+            (docs[-1].metadata["turn_start"], docs[-1].metadata["turn_end"]), (3, 6))
+
+    def test_step等于size等价非重叠(self):
+        overlap = build_act_chunk_docs(_history(1, 10), chunk_size=4, step=4, **self._kw())
+        plain = build_act_chunk_docs(_history(1, 10), chunk_size=4, **self._kw())
+        self.assertEqual([d.doc_id for d in overlap], [d.doc_id for d in plain])
+        self.assertEqual(len(overlap), 3)
+
+
 class BuildSceneDocsTests(unittest.TestCase):
     def test_combines_summary_and_chunks(self):
         docs = build_scene_docs(
