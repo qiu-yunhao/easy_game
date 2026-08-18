@@ -7,6 +7,7 @@ from eval_rag.dataset import (
     build_samples, build_scenes, gold_doc_id,
 )
 from eval_rag.retrieval_metrics import context_precision, context_recall
+from eval_rag.qa_generator import RecallQAGenerator
 
 
 class DatasetContractTests(unittest.TestCase):
@@ -54,6 +55,29 @@ class RetrievalMetricsTests(unittest.TestCase):
 
     def test_重复召回同一id只算一次(self):
         self.assertAlmostEqual(context_precision(["a", "a", "b"], ["a"]), 0.5)
+
+
+class _FakeAgent:
+    def __init__(self):
+        self.last_instruction = None
+    def command(self, instruction, history=None, response_format=None):
+        self.last_instruction = instruction
+        return "基于上下文的回答"
+
+
+class QAGeneratorTests(unittest.TestCase):
+    def test_把问题与上下文拼进指令并返回答案(self):
+        agent = _FakeAgent()
+        out = RecallQAGenerator(agent=agent).answer("我在客栈遇到了什么?", ["甲在客栈遇袭受伤"])
+        self.assertEqual(out, "基于上下文的回答")
+        self.assertIn("我在客栈遇到了什么?", agent.last_instruction)
+        self.assertIn("甲在客栈遇袭受伤", agent.last_instruction)
+
+    def test_无上下文时不调用llm直接降级(self):
+        agent = _FakeAgent()
+        out = RecallQAGenerator(agent=agent).answer("随便问", [])
+        self.assertIn("未检索到", out)
+        self.assertIsNone(agent.last_instruction)  # 未触发 LLM
 
 
 if __name__ == "__main__":
