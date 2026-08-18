@@ -102,3 +102,31 @@ HF_ENDPOINT=https://hf-mirror.com python3 scripts/extract_novel_template.py \
 （`story_template` / `template_style_bible` / `template_character` /
 `template_plot_beat` / `template_plot_skeleton`）+ pgvector（`style_passage` 片段，
 按 `tmpl:{tid}:` 前缀隔离多模板）。
+
+### RAG 回忆系统评测运行入口
+
+对 Recall 回忆系统做 RAG 质量评测：把评测场景语料灌入独立租户 **u9001:p9002**
+（与真实玩家数据完全隔离，不污染线上数据），逐样本检索并打分。
+
+降级模式（只检索两指标，免 LLM，跑得快，适合回归检索质量）：
+
+```bash
+HF_ENDPOINT=https://hf-mirror.com /Users/qiuyunhao.1/miniconda3/bin/python3 \
+  scripts/run_rag_eval.py --no-generation --limit 10
+```
+
+完整模式（四指标，真 DeepSeek 生成 + 打分）：
+
+```bash
+HF_ENDPOINT=https://hf-mirror.com /Users/qiuyunhao.1/miniconda3/bin/python3 \
+  scripts/run_rag_eval.py
+```
+
+报告落 `docs/rag_eval_report.md`（可用 `--report-path` 改）。四指标含义：
+
+| 指标 | 一句话含义 |
+|------|-----------|
+| context precision | 召回的上下文里有多大比例是真正相关的（少召回噪声）。 |
+| context recall | 该召回的相关上下文里有多大比例被召回到了（不漏关键往事）。 |
+| faithfulness | 生成的答案有多忠于召回上下文（不编造、不脱离证据）。 |
+| answer relevancy | 生成的答案对提问本身有多切题（不答非所问）。 |
