@@ -1,13 +1,16 @@
 """回忆(Recall)评测数据集：手写中文武侠/江湖游戏场景语料 + 约 50 条 QA 测试样本。
 
 用于评测本项目 Recall 检索系统的召回质量。为避免污染真实数据，使用独立租户
-u9001:p9002。场景 history 会被 scene indexer 以 chunk_size=4 切成 act_chunk，
-gold_doc_ids 精确指向真正承载答案的分块。
+u9001:p9002。场景 history 会被 scene indexer 以 chunk_size=4、step=2 的滑动窗口
+切成重叠 act_chunk（相邻窗口共享 2 条 history），chunk index 为窗口顺序号 seq：
+第 seq 个窗口覆盖 history 位置区间 [2*seq, 2*seq+4)。gold_doc_ids 指向真正承载
+答案的窗口——位置 p 常被相邻两个窗口 seq 覆盖（2*seq≤p<2*seq+4），故一条答案可能
+列多个 gold（recall 口径：任一 gold 命中即算覆盖）。
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from datatypes import tenant_prefix
 
@@ -29,10 +32,29 @@ class EvalSample:
     gold_answer: str
     gold_doc_ids: list[str]
     scene_id: str
+    # 每条必需信息的等价 gold 候选组(重叠邻窗)。用于分组 any-hit 召回:
+    # 组内命中任一即算覆盖。为空则退化为按 gold_doc_ids 扁平集合算召回。
+    gold_groups: list[list[str]] = field(default_factory=list)
 
 
 def gold_doc_id(scene_id: str, index: int) -> str:
     return f"{tenant_prefix(EVAL_USER_ID, EVAL_PLAYER_ID)}{scene_id}:act_chunk:{index}"
+
+
+def _sample(question: str, gold_answer: str, scene_id: str, *seqs: int) -> EvalSample:
+    """构造一条样本。*seqs 是承载答案的重叠邻窗顺序号,同属一条必需信息的等价候选。
+
+    这些 seq 合成一个 gold 组(any-hit:命中任一即算召回覆盖);同时扁平化为
+    gold_doc_ids 供 precision 计算。滑动窗口下一条答案常横跨 1-3 个相邻窗口。
+    """
+    ids = [gold_doc_id(scene_id, i) for i in seqs]
+    return EvalSample(
+        question=question,
+        gold_answer=gold_answer,
+        gold_doc_ids=ids,
+        scene_id=scene_id,
+        gold_groups=[ids],
+    )
 
 
 def _h(turn: int, actor: str, content: str, importance: float) -> dict:
@@ -40,7 +62,7 @@ def _h(turn: int, actor: str, content: str, importance: float) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# 场景语料。每个场景 history 长度经过设计，方便按 //4 定位答案所在 act_chunk。
+# 场景语料。每个场景 history 长度经过设计，以 step=2/size=4 滑动窗口切成重叠块。
 # ---------------------------------------------------------------------------
 
 def build_scenes() -> list[EvalScene]:
@@ -270,79 +292,80 @@ def build_scenes() -> list[EvalScene]:
 
 
 # ---------------------------------------------------------------------------
-# QA 样本。gold_doc_ids 的 chunk index = (答案所在 history 0-based 位置) // 4。
+# QA 样本。gold_doc_ids 的 chunk index = 承载答案的 history 位置 p 被哪些窗口 seq
+# 覆盖（step=2/size=4：2*seq≤p<2*seq+4，通常 1-2 个相邻窗口）。
 # ---------------------------------------------------------------------------
 
 def build_samples() -> list[EvalSample]:
     s: list[EvalSample] = []
-    g = gold_doc_id
+    S = _sample
 
     # scene_inn_01 (5)
-    s.append(EvalSample("玩家在客栈点了什么酒？", "女儿红。", [g("scene_inn_01", 0)], "scene_inn_01"))
-    s.append(EvalSample("是谁提醒玩家小心戴斗笠的人？", "角落里的独臂老者。", [g("scene_inn_01", 1)], "scene_inn_01"))
-    s.append(EvalSample("为首的黑衣人有什么外貌特征？", "左脸有一道刀疤。", [g("scene_inn_01", 1)], "scene_inn_01"))
-    s.append(EvalSample("黑衣人向玩家索要什么？", "赤霞令。", [g("scene_inn_01", 2)], "scene_inn_01"))
-    s.append(EvalSample("玩家最后如何脱身？", "独臂老者掷飞镖相助，玩家从后门杀出客栈。", [g("scene_inn_01", 2)], "scene_inn_01"))
+    s.append(S("玩家在客栈点了什么酒？", "女儿红。", "scene_inn_01", 0))
+    s.append(S("是谁提醒玩家小心戴斗笠的人？", "角落里的独臂老者。", "scene_inn_01", 1, 2))
+    s.append(S("为首的黑衣人有什么外貌特征？", "左脸有一道刀疤。", "scene_inn_01", 2, 3))
+    s.append(S("黑衣人向玩家索要什么？", "赤霞令。", "scene_inn_01", 3, 4))
+    s.append(S("玩家最后如何脱身？", "独臂老者掷飞镖相助，玩家从后门杀出客栈。", "scene_inn_01", 4))
 
     # scene_sect_01 (5)
-    s.append(EvalSample("玩家拜访的是哪座道观？", "青云山的玄真观。", [g("scene_sect_01", 0)], "scene_sect_01"))
-    s.append(EvalSample("玄真观的三戒是什么？", "不欺弱、不叛师、不滥杀。", [g("scene_sect_01", 1)], "scene_sect_01"))
-    s.append(EvalSample("掌门如何罚玩家磨心性？", "罚他挑水三月。", [g("scene_sect_01", 1)], "scene_sect_01"))
-    s.append(EvalSample("红衣师姐赠给玩家什么？她叫什么名字？", "赠《吐纳心法》，她名叫沈青霜。", [g("scene_sect_01", 2)], "scene_sect_01"))
-    s.append(EvalSample("玩家最终师承哪一脉？", "玄真观清虚一脉。", [g("scene_sect_01", 2)], "scene_sect_01"))
+    s.append(S("玩家拜访的是哪座道观？", "青云山的玄真观。", "scene_sect_01", 0))
+    s.append(S("玄真观的三戒是什么？", "不欺弱、不叛师、不滥杀。", "scene_sect_01", 1, 2))
+    s.append(S("掌门如何罚玩家磨心性？", "罚他挑水三月。", "scene_sect_01", 2, 3))
+    s.append(S("红衣师姐赠给玩家什么？她叫什么名字？", "赠《吐纳心法》，她名叫沈青霜。", "scene_sect_01", 3, 4))
+    s.append(S("玩家最终师承哪一脉？", "玄真观清虚一脉。", "scene_sect_01", 4))
 
     # scene_forest_01 (5)
-    s.append(EvalSample("玩家在密林里踩中了什么？", "一根细如发丝的绊索。", [g("scene_forest_01", 0)], "scene_forest_01"))
-    s.append(EvalSample("蒙面人使的是哪一派的武功路数？", "崆峒派的路数。", [g("scene_forest_01", 1)], "scene_forest_01"))
-    s.append(EvalSample("蒙面头领的真实身份是谁？", "玩家昔日同窗、叛变的师弟柳明。", [g("scene_forest_01", 2)], "scene_forest_01"))
-    s.append(EvalSample("柳明埋伏玩家的目的是什么？", "抢夺那半张藏宝图。", [g("scene_forest_01", 2)], "scene_forest_01"))
-    s.append(EvalSample("玩家如何脱离埋伏？", "借林间地势周旋，击退众人后夺路而走。", [g("scene_forest_01", 2)], "scene_forest_01"))
+    s.append(S("玩家在密林里踩中了什么？", "一根细如发丝的绊索。", "scene_forest_01", 0, 1))
+    s.append(S("蒙面人使的是哪一派的武功路数？", "崆峒派的路数。", "scene_forest_01", 2, 3))
+    s.append(S("蒙面头领的真实身份是谁？", "玩家昔日同窗、叛变的师弟柳明。", "scene_forest_01", 3, 4))
+    s.append(S("柳明埋伏玩家的目的是什么？", "抢夺那半张藏宝图。", "scene_forest_01", 3, 4))
+    s.append(S("玩家如何脱离埋伏？", "借林间地势周旋，击退众人后夺路而走。", "scene_forest_01", 4))
 
     # scene_market_01 (5)
-    s.append(EvalSample("玩家在坊市想买什么解毒药？", "解百毒的雪蟾丸。", [g("scene_market_01", 0)], "scene_market_01"))
-    s.append(EvalSample("雪蟾丸的价钱是多少？", "一颗三百两黄金。", [g("scene_market_01", 1)], "scene_market_01"))
-    s.append(EvalSample("玩家用什么换到了雪蟾丸？", "一枚前朝御赐的羊脂玉佩。", [g("scene_market_01", 1)], "scene_market_01"))
-    s.append(EvalSample("书生姓什么，他警告了玩家什么？", "姓顾，警告漕帮正在全城搜寻那枚玉佩。", [g("scene_market_01", 2)], "scene_market_01"))
-    s.append(EvalSample("玩家离开坊市时带走了什么？", "怀揣着雪蟾丸，随顾书生离开。", [g("scene_market_01", 2)], "scene_market_01"))
+    s.append(S("玩家在坊市想买什么解毒药？", "解百毒的雪蟾丸。", "scene_market_01", 0, 1))
+    s.append(S("雪蟾丸的价钱是多少？", "一颗三百两黄金。", "scene_market_01", 1, 2))
+    s.append(S("玩家用什么换到了雪蟾丸？", "一枚前朝御赐的羊脂玉佩。", "scene_market_01", 1, 2, 3))
+    s.append(S("书生姓什么，他警告了玩家什么？", "姓顾，警告漕帮正在全城搜寻那枚玉佩。", "scene_market_01", 4))
+    s.append(S("玩家离开坊市时带走了什么？", "怀揣着雪蟾丸，随顾书生离开。", "scene_market_01", 4))
 
     # scene_arena_01 (5)
-    s.append(EvalSample("玩家参加比武抽到第几签？", "第七签。", [g("scene_arena_01", 0)], "scene_arena_01"))
-    s.append(EvalSample("玩家半决赛的对手是谁？", "剑法凌厉的峨眉女侠。", [g("scene_arena_01", 1)], "scene_arena_01"))
-    s.append(EvalSample("决赛蒙面人用的是什么武功？", "左右互搏之术。", [g("scene_arena_01", 2)], "scene_arena_01"))
-    s.append(EvalSample("蒙面人败退时露出了什么标记？", "一道朱砂痣。", [g("scene_arena_01", 2)], "scene_arena_01"))
-    s.append(EvalSample("玩家夺魁后为何无心招亲？", "因记挂那朱砂痣蒙面人的来历。", [g("scene_arena_01", 2)], "scene_arena_01"))
+    s.append(S("玩家参加比武抽到第几签？", "第七签。", "scene_arena_01", 0))
+    s.append(S("玩家半决赛的对手是谁？", "剑法凌厉的峨眉女侠。", "scene_arena_01", 1, 2))
+    s.append(S("决赛蒙面人用的是什么武功？", "左右互搏之术。", "scene_arena_01", 3, 4))
+    s.append(S("蒙面人败退时露出了什么标记？", "一道朱砂痣。", "scene_arena_01", 3, 4))
+    s.append(S("玩家夺魁后为何无心招亲？", "因记挂那朱砂痣蒙面人的来历。", "scene_arena_01", 4))
 
     # scene_camp_01 (6)
-    s.append(EvalSample("玩家夜探敌营是在什么时辰？", "子时三刻。", [g("scene_camp_01", 0)], "scene_camp_01"))
-    s.append(EvalSample("敌军计划何时、从哪里攻城？", "三日后子夜，从西水门下手。", [g("scene_camp_01", 1)], "scene_camp_01"))
-    s.append(EvalSample("敌军买通了谁做内应？", "守将徐都尉。", [g("scene_camp_01", 1)], "scene_camp_01"))
-    s.append(EvalSample("敌军粮草囤在哪里？", "东南角的破庙。", [g("scene_camp_01", 2)], "scene_camp_01"))
-    s.append(EvalSample("玩家用什么手段扰乱敌军？", "潜入破庙用火折子火烧粮草。", [g("scene_camp_01", 2)], "scene_camp_01"))
-    s.append(EvalSample("玩家把消息报给了谁？", "城中的守城校尉。", [g("scene_camp_01", 3)], "scene_camp_01"))
+    s.append(S("玩家夜探敌营是在什么时辰？", "子时三刻。", "scene_camp_01", 0))
+    s.append(S("敌军计划何时、从哪里攻城？", "三日后子夜，从西水门下手。", "scene_camp_01", 1, 2))
+    s.append(S("敌军买通了谁做内应？", "守将徐都尉。", "scene_camp_01", 1, 2))
+    s.append(S("敌军粮草囤在哪里？", "东南角的破庙。", "scene_camp_01", 3, 4))
+    s.append(S("玩家用什么手段扰乱敌军？", "潜入破庙用火折子火烧粮草。", "scene_camp_01", 4, 5))
+    s.append(S("玩家把消息报给了谁？", "城中的守城校尉。", "scene_camp_01", 6))
 
     # scene_morgue_01 (5)
-    s.append(EvalSample("第一具尸体有什么中毒征兆？", "七窍无血、指甲发黑。", [g("scene_morgue_01", 0)], "scene_morgue_01"))
-    s.append(EvalSample("玩家判断死者中的是什么毒？", "见血封喉的孔雀胆。", [g("scene_morgue_01", 0)], "scene_morgue_01"))
-    s.append(EvalSample("凶手用什么手法喂毒？", "用极细的银针喂毒。", [g("scene_morgue_01", 1)], "scene_morgue_01"))
-    s.append(EvalSample("第三具尸体攥着什么信物，属于谁？", "绣并蒂莲的帕子，是烟雨楼花魁的信物。", [g("scene_morgue_01", 1)], "scene_morgue_01"))
-    s.append(EvalSample("是谁来义庄收尸？", "一个跛脚的黑影。", [g("scene_morgue_01", 2)], "scene_morgue_01"))
+    s.append(S("第一具尸体有什么中毒征兆？", "七窍无血、指甲发黑。", "scene_morgue_01", 0, 1))
+    s.append(S("玩家判断死者中的是什么毒？", "见血封喉的孔雀胆。", "scene_morgue_01", 0, 1))
+    s.append(S("凶手用什么手法喂毒？", "用极细的银针喂毒。", "scene_morgue_01", 1, 2))
+    s.append(S("第三具尸体攥着什么信物，属于谁？", "绣并蒂莲的帕子，是烟雨楼花魁的信物。", "scene_morgue_01", 2, 3))
+    s.append(S("是谁来义庄收尸？", "一个跛脚的黑影。", "scene_morgue_01", 4))
 
-    # scene_ferry_01 (3)
-    s.append(EvalSample("玩家在渡口与谁话别？", "红颜知己苏婉。", [g("scene_ferry_01", 0)], "scene_ferry_01"))
-    s.append(EvalSample("玩家赠给苏婉什么信物？", "随身的玉箫。", [g("scene_ferry_01", 0)], "scene_ferry_01"))
-    s.append(EvalSample("苏婉回赠了什么，玩家许下什么约定？", "回赠求了三年香火的平安符，玩家许下三年之约。", [g("scene_ferry_01", 1)], "scene_ferry_01"))
-    s.append(EvalSample("话别的渡口在哪条水道边？", "运河渡口，长亭古道边烟波浩渺。", [g("scene_ferry_01", 0)], "scene_ferry_01"))
+    # scene_ferry_01 (4)
+    s.append(S("玩家在渡口与谁话别？", "红颜知己苏婉。", "scene_ferry_01", 0))
+    s.append(S("玩家赠给苏婉什么信物？", "随身的玉箫。", "scene_ferry_01", 0, 1))
+    s.append(S("苏婉回赠了什么，玩家许下什么约定？", "回赠求了三年香火的平安符，玩家许下三年之约。", "scene_ferry_01", 1, 2))
+    s.append(S("话别的渡口在哪条水道边？", "运河渡口，长亭古道边烟波浩渺。", "scene_ferry_01", 0))
 
     # scene_casino_01 (4)
-    s.append(EvalSample("玩家在赌坊第一把押了多少银子？", "五十两银。", [g("scene_casino_01", 0)], "scene_casino_01"))
-    s.append(EvalSample("赌坊作弊的骰子有什么名堂？", "灌了水银的诈骰。", [g("scene_casino_01", 1)], "scene_casino_01"))
-    s.append(EvalSample("玩家如何反败为胜？", "佯装醉酒暗中调换骰盅，连开三个豹子赢回本金。", [g("scene_casino_01", 1), g("scene_casino_01", 2)], "scene_casino_01"))
-    s.append(EvalSample("玩家查到赌坊背后是谁的产业？", "漕帮的产业。", [g("scene_casino_01", 2)], "scene_casino_01"))
+    s.append(S("玩家在赌坊第一把押了多少银子？", "五十两银。", "scene_casino_01", 0))
+    s.append(S("赌坊作弊的骰子有什么名堂？", "灌了水银的诈骰。", "scene_casino_01", 1, 2))
+    s.append(S("玩家如何反败为胜？", "佯装醉酒暗中调换骰盅，连开三个豹子赢回本金。", "scene_casino_01", 1, 2, 3))
+    s.append(S("玩家查到赌坊背后是谁的产业？", "漕帮的产业。", "scene_casino_01", 4))
 
     # scene_court_01 (4)
-    s.append(EvalSample("皇帝召见玩家问的是什么事？", "他只身破了敌军攻城之谋一事。", [g("scene_court_01", 0)], "scene_court_01"))
-    s.append(EvalSample("玩家用什么向太师证明自己？", "呈上从敌营取回的密信。", [g("scene_court_01", 1)], "scene_court_01"))
-    s.append(EvalSample("皇帝下旨彻查谁？", "内应徐都尉。", [g("scene_court_01", 1)], "scene_court_01"))
-    s.append(EvalSample("玩家婉拒官职，只求什么赏赐？", "一道通行天下的免死金牌。", [g("scene_court_01", 2)], "scene_court_01"))
+    s.append(S("皇帝召见玩家问的是什么事？", "他只身破了敌军攻城之谋一事。", "scene_court_01", 0, 1))
+    s.append(S("玩家用什么向太师证明自己？", "呈上从敌营取回的密信。", "scene_court_01", 1, 2))
+    s.append(S("皇帝下旨彻查谁？", "内应徐都尉。", "scene_court_01", 2, 3))
+    s.append(S("玩家婉拒官职，只求什么赏赐？", "一道通行天下的免死金牌。", "scene_court_01", 4))
 
     return s

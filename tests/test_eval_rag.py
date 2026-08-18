@@ -6,7 +6,9 @@ from eval_rag.dataset import (
     EVAL_PLAYER_ID, EVAL_USER_ID, EvalSample, EvalScene,
     build_samples, build_scenes, gold_doc_id,
 )
-from eval_rag.retrieval_metrics import context_precision, context_recall
+from eval_rag.retrieval_metrics import (
+    context_precision, context_recall, context_recall_grouped,
+)
 from eval_rag.qa_generator import RecallQAGenerator
 from eval_rag.generation_metrics import GenerationJudge
 
@@ -38,10 +40,18 @@ class DatasetContractTests(unittest.TestCase):
             self.assertTrue(smp.question and smp.gold_answer)
             self.assertTrue(smp.gold_doc_ids)
             scene = scenes[smp.scene_id]
-            max_chunk = (len(scene.history) - 1) // 4
+            # step=2/size=4 滑动窗口：起点 0,2,4,… 直到 index+size>=n 即止(末窗)。
+            # 窗口数 = 满足条件的起点个数，其最大顺序号即 gold 允许的上界。
+            n = len(scene.history)
+            starts = []
+            for index in range(0, n, 2):
+                starts.append(index)
+                if index + 4 >= n:
+                    break
+            max_seq = len(starts) - 1
             for did in smp.gold_doc_ids:
-                idx = int(did.rsplit(":", 1)[1])  # gold 引用的 act_chunk index 不得越界
-                self.assertLessEqual(idx, max_chunk)
+                idx = int(did.rsplit(":", 1)[1])  # gold 引用的 act_chunk 窗口顺序号不得越界
+                self.assertLessEqual(idx, max_seq)
 
 
 class RetrievalMetricsTests(unittest.TestCase):
@@ -59,6 +69,19 @@ class RetrievalMetricsTests(unittest.TestCase):
 
     def test_重复召回同一id只算一次(self):
         self.assertAlmostEqual(context_precision(["a", "a", "b"], ["a"]), 0.5)
+
+    def test_分组any_hit_组内命中任一即覆盖(self):
+        # 两组必需信息;第一组命中其一(重叠邻窗 a2),第二组命中 b1 → 2/2 全覆盖
+        self.assertAlmostEqual(
+            context_recall_grouped(["a2", "b1"], [["a1", "a2"], ["b1", "b2"]]), 1.0)
+
+    def test_分组any_hit_未命中的组不计覆盖(self):
+        # 第一组命中,第二组一个都没召回 → 1/2
+        self.assertAlmostEqual(
+            context_recall_grouped(["a1"], [["a1", "a2"], ["b1", "b2"]]), 0.5)
+
+    def test_分组为空_recall_为1(self):
+        self.assertEqual(context_recall_grouped(["x"], []), 1.0)
 
 
 class _FakeAgent:
@@ -138,8 +161,8 @@ class _FakeRecall:
     def __init__(self, mapping):
         self._mapping = mapping
         self.indexed = []
-    def index_completed_scenes(self, scenes, *, user_id, player_id, chunk_size=4):
-        self.indexed.append((list(scenes), user_id, player_id))
+    def index_completed_scenes(self, scenes, *, user_id, player_id, chunk_size=4, step=None):
+        self.indexed.append((list(scenes), user_id, player_id, step))
     def query_recall(self, query, *, user_id, player_id, top_k=10, coarse_k=5):
         return self._mapping.get(query, [])
 

@@ -13,7 +13,9 @@ from dataclasses import dataclass, field
 from eval_rag.dataset import (
     EVAL_PLAYER_ID, EVAL_USER_ID, EvalSample, EvalScene,
 )
-from eval_rag.retrieval_metrics import context_precision, context_recall
+from eval_rag.retrieval_metrics import (
+    context_precision, context_recall, context_recall_grouped,
+)
 
 _METRICS = ("context_precision", "context_recall",
             "faithfulness", "answer_relevancy", "answer_correctness")
@@ -72,7 +74,7 @@ class RecallEvaluator:
         self._qa = qa_generator
         self._judge = judge
 
-    def index(self, scenes: list[EvalScene]) -> None:
+    def index(self, scenes: list[EvalScene], *, step: int | None = None) -> None:
         dicts = [
             {
                 "scene_id": s.scene_id,
@@ -83,7 +85,7 @@ class RecallEvaluator:
             for s in scenes
         ]
         self._recall.index_completed_scenes(
-            dicts, user_id=EVAL_USER_ID, player_id=EVAL_PLAYER_ID)
+            dicts, user_id=EVAL_USER_ID, player_id=EVAL_PLAYER_ID, step=step)
 
     def evaluate(
         self,
@@ -104,7 +106,11 @@ class RecallEvaluator:
             retrieved_ids = [s.doc.doc_id for s in scored]
             contexts = [s.doc.text for s in scored]
             precision = context_precision(retrieved_ids, sample.gold_doc_ids)
-            recall = context_recall(retrieved_ids, sample.gold_doc_ids)
+            # 有分组时按 any-hit（重叠邻窗组内命中任一即覆盖）；无分组退化为扁平集合召回。
+            if sample.gold_groups:
+                recall = context_recall_grouped(retrieved_ids, sample.gold_groups)
+            else:
+                recall = context_recall(retrieved_ids, sample.gold_doc_ids)
 
             if gen_on:
                 answer = self._qa.answer(sample.question, contexts)

@@ -40,6 +40,8 @@ def main() -> int:
                         help="Markdown 报告输出路径")
     parser.add_argument("--no-generation", action="store_true",
                         help="降级为只检索两指标,跳过 LLM 生成/打分")
+    parser.add_argument("--chunk-step", type=int, default=2,
+                        help="act_chunk 滑动窗口步长(默认 2,重叠索引;=chunk_size 则非重叠)")
     args = parser.parse_args()
 
     with_generation = not args.no_generation
@@ -72,8 +74,8 @@ def main() -> int:
         judge = None
     ev = RecallEvaluator(recall_service=service, qa_generator=qa, judge=judge)
 
-    ev.index(scenes)
-    print(f"[3] 已索引 {len(scenes)} 个评测场景到向量库 (租户 u9001:p9002)")
+    ev.index(scenes, step=args.chunk_step)
+    print(f"[3] 已索引 {len(scenes)} 个评测场景到向量库 (租户 u9001:p9002, step={args.chunk_step})")
 
     report = ev.evaluate(samples, top_k=args.top_k, with_generation=with_generation)
     print("[4] 逐样本检索/生成打分完成")
