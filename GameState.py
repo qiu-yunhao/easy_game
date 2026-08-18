@@ -73,6 +73,7 @@ class PlotState(TypedDict):
     next_chapter_realm: str
     chapter_transition_requirement: str
     completed_chapters: list[ChapterArchive]
+    selected_template_id: int
 
 
 class SceneState(TypedDict):

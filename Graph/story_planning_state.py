@@ -266,3 +266,23 @@ def _apply_scene_candidates(
             "scene_candidates": candidates,
         },
     }
+
+
+def apply_selected_template(state: GameState, template_id: object) -> GameState:
+    """建游戏/大章开始时设定当前情节模板。template_id<=0（或非法）清为 0=无模板。
+
+    不可变更新：返回新 state，不原地改。软指导链路读 plot.selected_template_id。
+    """
+    try:
+        tid = int(template_id)
+    except (TypeError, ValueError):
+        tid = 0
+    if tid < 0:
+        tid = 0
+    return {
+        **state,
+        "plot": {
+            **state["plot"],
+            "selected_template_id": tid,
+        },
+    }

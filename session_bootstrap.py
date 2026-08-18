@@ -257,6 +257,7 @@ def build_opening_state(
             "chapter_focus_source": "",
             "scene_candidates_source": "",
             "current_chapter_index": 0,
+            "selected_template_id": 0,
             "cultivation_goal": cultivation_goal,
             "current_player_realm": current_player_realm,
             "current_chapter_realm": current_chapter_realm,

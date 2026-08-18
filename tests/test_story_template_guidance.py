@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import unittest
 
+from Graph.story_planning_state import apply_selected_template
 from PlayerWriter.StoryTemplateGuidance import (
     build_template_query,
     format_beat_guidance,
@@ -125,3 +126,27 @@ class FormatBeatGuidanceTests(unittest.TestCase):
         self.assertEqual(
             format_beat_guidance([{}, {"label": "", "summary": ""}]), ""
         )
+
+
+class ApplySelectedTemplateTests(unittest.TestCase):
+    def _state(self, tid=0):
+        return {"plot": {"selected_template_id": tid, "chapter_goal": "开局"}, "scene": {}}
+
+    def test_设正值写入selected_template_id(self):
+        out = apply_selected_template(self._state(), 42)
+        self.assertEqual(out["plot"]["selected_template_id"], 42)
+
+    def test_零或负值清为0(self):
+        self.assertEqual(apply_selected_template(self._state(7), 0)["plot"]["selected_template_id"], 0)
+        self.assertEqual(apply_selected_template(self._state(7), -3)["plot"]["selected_template_id"], 0)
+
+    def test_非整数入参强制转int(self):
+        self.assertEqual(apply_selected_template(self._state(), "5")["plot"]["selected_template_id"], 5)
+
+    def test_返回新state不改原state(self):
+        original = self._state(1)
+        out = apply_selected_template(original, 99)
+        self.assertEqual(original["plot"]["selected_template_id"], 1)  # 原 state 未被改
+        self.assertIsNot(out, original)
+        self.assertIsNot(out["plot"], original["plot"])
+        self.assertEqual(out["plot"]["chapter_goal"], "开局")  # 其他字段保留
