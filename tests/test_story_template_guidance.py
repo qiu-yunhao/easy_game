@@ -77,6 +77,20 @@ class FormatSkeletonGuidanceTests(unittest.TestCase):
     def test_空列表返回空串(self):
         self.assertEqual(format_skeleton_guidance([]), "")
 
+    def test_单字段节点走对应分支(self):
+        # title 存在则走 f"- {title}：{summary}" 分支（summary 空 → 尾随冒号）
+        only_title = format_skeleton_guidance([{"title": "初入江湖"}])
+        self.assertIn("\n- 初入江湖：", only_title)
+        # 仅 summary 走 else 分支 f"- {summary}"，无冒号
+        only_summary = format_skeleton_guidance([{"event_summary": "主角离乡"}])
+        self.assertIn("\n- 主角离乡", only_summary)
+        self.assertNotIn("- 主角离乡：", only_summary)
+
+    def test_全空节点静默降级返回空串(self):
+        self.assertEqual(
+            format_skeleton_guidance([{}, {"title": "", "event_summary": ""}]), ""
+        )
+
 
 class FormatBeatGuidanceTests(unittest.TestCase):
     def test_多桥段转软指导文本(self):
@@ -94,3 +108,20 @@ class FormatBeatGuidanceTests(unittest.TestCase):
 
     def test_空列表返回空串(self):
         self.assertEqual(format_beat_guidance([]), "")
+
+    def test_有戏剧功能时带后缀(self):
+        text = format_beat_guidance(
+            [{"label": "伏击", "summary": "设伏", "dramatic_function": "制造危机"}]
+        )
+        self.assertIn("- 伏击：设伏", text)
+        self.assertIn("（戏剧功能：制造危机）", text)
+
+    def test_无戏剧功能时不带后缀(self):
+        text = format_beat_guidance([{"label": "伏击", "summary": "设伏"}])
+        self.assertIn("- 伏击：设伏", text)
+        self.assertNotIn("（戏剧功能：", text)
+
+    def test_全空桥段静默降级返回空串(self):
+        self.assertEqual(
+            format_beat_guidance([{}, {"label": "", "summary": ""}]), ""
+        )
