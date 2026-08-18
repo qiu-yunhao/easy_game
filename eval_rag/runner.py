@@ -15,13 +15,15 @@ from eval_rag.dataset import (
 )
 from eval_rag.retrieval_metrics import context_precision, context_recall
 
-_METRICS = ("context_precision", "context_recall", "faithfulness", "answer_relevancy")
+_METRICS = ("context_precision", "context_recall",
+            "faithfulness", "answer_relevancy", "answer_correctness")
 
 
 @dataclass
 class SampleResult:
     question: str
     scene_id: str
+    gold_answer: str
     retrieved_ids: list[str]
     contexts: list[str]
     answer: str | None
@@ -29,6 +31,7 @@ class SampleResult:
     context_recall: float
     faithfulness: float | None
     answer_relevancy: float | None
+    answer_correctness: float | None
 
 
 @dataclass
@@ -38,6 +41,7 @@ class EvalReport:
     mean_context_recall: float
     mean_faithfulness: float | None
     mean_answer_relevancy: float | None
+    mean_answer_correctness: float | None
     buckets: dict = field(default_factory=dict)
 
 
@@ -106,14 +110,18 @@ class RecallEvaluator:
                 answer = self._qa.answer(sample.question, contexts)
                 faith = self._judge.faithfulness(answer, contexts)
                 rel = self._judge.answer_relevancy(sample.question, answer)
+                correct = self._judge.answer_correctness(
+                    sample.question, answer, sample.gold_answer)
             else:
                 answer = None
                 faith = None
                 rel = None
+                correct = None
 
             results.append(SampleResult(
                 question=sample.question,
                 scene_id=sample.scene_id,
+                gold_answer=sample.gold_answer,
                 retrieved_ids=retrieved_ids,
                 contexts=contexts,
                 answer=answer,
@@ -121,6 +129,7 @@ class RecallEvaluator:
                 context_recall=recall,
                 faithfulness=faith,
                 answer_relevancy=rel,
+                answer_correctness=correct,
             ))
         return self.summarize(results, with_generation=gen_on)
 
@@ -131,6 +140,7 @@ class RecallEvaluator:
         recalls = [r.context_recall for r in results]
         faiths = [r.faithfulness for r in results if r.faithfulness is not None]
         rels = [r.answer_relevancy for r in results if r.answer_relevancy is not None]
+        corrects = [r.answer_correctness for r in results if r.answer_correctness is not None]
 
         buckets: dict[str, dict[str, int]] = {
             "context_precision": _distribution(precisions),
@@ -139,6 +149,7 @@ class RecallEvaluator:
         if with_generation:
             buckets["faithfulness"] = _distribution(faiths)
             buckets["answer_relevancy"] = _distribution(rels)
+            buckets["answer_correctness"] = _distribution(corrects)
 
         return EvalReport(
             samples=results,
@@ -146,6 +157,7 @@ class RecallEvaluator:
             mean_context_recall=_mean(recalls),
             mean_faithfulness=_mean(faiths) if with_generation else None,
             mean_answer_relevancy=_mean(rels) if with_generation else None,
+            mean_answer_correctness=_mean(corrects) if with_generation else None,
             buckets=buckets,
         )
 
@@ -174,6 +186,7 @@ def write_report(report: EvalReport, path: str) -> None:
     lines.append(f"| context_recall | {_fmt(report.mean_context_recall)} |")
     lines.append(f"| faithfulness | {_fmt(report.mean_faithfulness)} |")
     lines.append(f"| answer_relevancy | {_fmt(report.mean_answer_relevancy)} |")
+    lines.append(f"| answer_correctness | {_fmt(report.mean_answer_correctness)} |")
     lines.append("")
 
     lines.append("## 分数分布")
@@ -200,11 +213,13 @@ def write_report(report: EvalReport, path: str) -> None:
         lines.append("- contexts:")
         for c in r.contexts:
             lines.append(f"  - {_truncate(c)}")
-        lines.append(f"- answer: {r.answer if r.answer is not None else 'N/A'}")
+        lines.append(f"- 标准答案(gold): {r.gold_answer}")
+        lines.append(f"- 系统回答(answer): {r.answer if r.answer is not None else 'N/A'}")
         lines.append(f"- context_precision: {_fmt(r.context_precision)}")
         lines.append(f"- context_recall: {_fmt(r.context_recall)}")
         lines.append(f"- faithfulness: {_fmt(r.faithfulness)}")
         lines.append(f"- answer_relevancy: {_fmt(r.answer_relevancy)}")
+        lines.append(f"- answer_correctness: {_fmt(r.answer_correctness)}")
         lines.append("")
 
     with open(path, "w", encoding="utf-8") as f:

@@ -115,6 +115,24 @@ class GenerationMetricsTests(unittest.TestCase):
         GenerationJudge(agent=agent).faithfulness("a", ["c"])
         self.assertEqual(agent.calls[0][1], "json")  # response_format
 
+    def test_answer_correctness_读取裁判分数(self):
+        s = GenerationJudge(agent=_ScriptedJudge({"score": 0.7, "reason": "基本一致"})).answer_correctness(
+            "买什么解毒药?", "雪蟾丸", "解百毒的雪蟾丸")
+        self.assertAlmostEqual(s, 0.7)
+
+    def test_correctness_把三要素都拼进指令(self):
+        agent = _ScriptedJudge({"score": 1.0})
+        GenerationJudge(agent=agent).answer_correctness("抽第几签?", "第七签", "第七签")
+        instr = agent.calls[0][0]
+        self.assertIn("抽第几签?", instr)
+        self.assertIn("第七签", instr)
+        self.assertEqual(agent.calls[0][1], "json")
+
+    def test_correctness_缺score降级为0(self):
+        self.assertEqual(
+            GenerationJudge(agent=_ScriptedJudge({"没有score": 1})).answer_correctness("q", "a", "g"),
+            0.0)
+
 
 class _FakeRecall:
     def __init__(self, mapping):
@@ -140,6 +158,7 @@ class RunnerTests(unittest.TestCase):
         class _J:
             def faithfulness(self, a, c): return 1.0
             def answer_relevancy(self, question, a): return 0.9
+            def answer_correctness(self, question, a, gold): return 0.8
         ev = RecallEvaluator(recall_service=recall, qa_generator=_QA(), judge=_J())
         samples = [EvalSample(question=q, gold_answer="遇袭", gold_doc_ids=["g1"], scene_id="s1")]
         report = ev.evaluate(samples, top_k=10, with_generation=True)
@@ -148,7 +167,10 @@ class RunnerTests(unittest.TestCase):
         self.assertAlmostEqual(r.context_recall, 1.0)
         self.assertAlmostEqual(r.faithfulness, 1.0)
         self.assertAlmostEqual(r.answer_relevancy, 0.9)
+        self.assertAlmostEqual(r.answer_correctness, 0.8)
+        self.assertEqual(r.gold_answer, "遇袭")  # 标准答案随结果流转,供报告对比
         self.assertAlmostEqual(report.mean_context_recall, 1.0)
+        self.assertAlmostEqual(report.mean_answer_correctness, 0.8)
 
     def test_关闭生成时跳过llm指标(self):
         recall = _FakeRecall({"q": [_sd("g1", "t", 0.9)]})
@@ -156,6 +178,7 @@ class RunnerTests(unittest.TestCase):
         samples = [EvalSample(question="q", gold_answer="a", gold_doc_ids=["g1"], scene_id="s1")]
         report = ev.evaluate(samples, top_k=10, with_generation=False)
         self.assertIsNone(report.samples[0].faithfulness)
+        self.assertIsNone(report.samples[0].answer_correctness)
 
 
 if __name__ == "__main__":

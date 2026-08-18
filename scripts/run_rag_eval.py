@@ -82,10 +82,11 @@ def main() -> int:
         return "N/A" if value is None else f"{value:.3f}"
 
     print("\n[指标均值]")
-    print(f"    context_precision = {_fmt(report.mean_context_precision)}")
-    print(f"    context_recall    = {_fmt(report.mean_context_recall)}")
-    print(f"    faithfulness      = {_fmt(report.mean_faithfulness)}")
-    print(f"    answer_relevancy  = {_fmt(report.mean_answer_relevancy)}")
+    print(f"    context_precision  = {_fmt(report.mean_context_precision)}")
+    print(f"    context_recall     = {_fmt(report.mean_context_recall)}")
+    print(f"    faithfulness       = {_fmt(report.mean_faithfulness)}")
+    print(f"    answer_relevancy   = {_fmt(report.mean_answer_relevancy)}")
+    print(f"    answer_correctness = {_fmt(report.mean_answer_correctness)}")
 
     print("\n[分档分布]")
     for metric, dist in report.buckets.items():
