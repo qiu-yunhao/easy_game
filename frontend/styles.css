@@ -1427,3 +1427,15 @@ textarea {
     max-width: 100%;
   }
 }
+
+.entry-hero{min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;text-align:center}
+.entry-title{font-size:48px;letter-spacing:.2em}
+.entry-sub{opacity:.7;letter-spacing:.4em}
+.entry-enter{padding:12px 48px;font-size:16px}
+.login-shell{max-width:640px;margin:80px auto;padding:24px}
+.login-row{display:flex;gap:12px;margin:16px 0}
+.login-row input{flex:1;padding:10px}
+.save-hub{margin-top:24px}
+.save-slot-list{display:flex;flex-direction:column;gap:8px}
+.save-slot{text-align:left;padding:12px}
+.login-msg{opacity:.7;margin-top:12px}

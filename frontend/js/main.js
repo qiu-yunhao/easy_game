@@ -1,7 +1,9 @@
 import { startRouter, register } from "./router.js";
+import { renderEntry } from "./pages/entry.js";
+import { renderLogin } from "./pages/login.js";
 
-register("entry", (el) => { el.innerHTML = `<div class="route-entry">入口占位</div>`; });
-register("login", (el) => { el.innerHTML = `<div class="route-login">登录占位</div>`; });
+register("entry", renderEntry);
+register("login", renderLogin);
 register("select", (el) => { el.innerHTML = `<div class="route-select">选择页占位</div>`; });
 
 const mount = document.getElementById("app");
