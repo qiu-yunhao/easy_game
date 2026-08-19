@@ -27,17 +27,6 @@ const NARRATION_PRESENTATION_MAP = {
   cultivation_progress: { channel: "修行回响", speaker: "系统旁白", role: "成长反馈" },
 };
 
-const DEFAULT_RESET_PROFILE = {
-  name: "无名修士",
-  gender: "未定",
-  race: "人族",
-  spiritual_root: "杂灵根",
-  realm: "练气一层",
-  main_technique: "基础吐纳术",
-  background: "出身凡俗，尚未真正看清自己的仙途。",
-  backpack: [],
-};
-
 function escapeHtml(value) {
   return String(value)
     .replaceAll("&", "&amp;")
@@ -474,21 +463,14 @@ export function renderChat(el) {
 
   refreshTemplateTag();
 
-  // ---- Bootstrap: load state; if no scene, auto-start one ----
+  // ---- Bootstrap: load current state (开局由「自定义开局」子步负责) ----
   (async () => {
     setBusy(true);
     setStatus("正在加载状态…");
     try {
-      let state = await api.getState();
-      if (!state?.story_initialized) {
-        setStatus("正在开局…");
-        state = await api.reset({
-          player_profile: DEFAULT_RESET_PROFILE,
-          selected_template_id: appState.selectedTemplateId ?? null,
-        });
-      }
+      const state = await api.getState();
       renderState(state);
-      setStatus("");
+      setStatus(state?.story_initialized ? "" : "请先在上一步新开一局。");
     } catch (error) {
       setStatus(error.message || "加载失败。");
     } finally {

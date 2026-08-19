@@ -1486,3 +1486,10 @@ textarea {
 .tpl-progress{font-size:12px;opacity:.75;margin:0}
 .modal-large{width:80vw;height:80vh;display:flex;flex-direction:column}
 .modal-large .modal-body{flex:1;overflow:auto;padding:8px 4px}
+.newgame-form{max-width:640px;margin:60px auto;padding:24px;display:flex;flex-direction:column;gap:16px}
+.newgame-form h2{margin:0}
+.newgame-field{display:flex;flex-direction:column;gap:6px;font-size:14px}
+.newgame-field span{opacity:.8}
+.newgame-field input,.newgame-field textarea,.newgame-field select{padding:10px;font:inherit;border-radius:8px}
+.newgame-field textarea{resize:vertical}
+.newgame-actions{display:flex;gap:12px;justify-content:flex-end;margin-top:4px}

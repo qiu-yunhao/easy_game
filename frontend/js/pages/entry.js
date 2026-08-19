@@ -7,5 +7,5 @@ export function renderEntry(el) {
       <p class="entry-sub">修仙叙事台</p>
       <button class="button button-primary entry-enter" type="button">进入</button>
     </section>`;
-  el.querySelector(".entry-enter").addEventListener("click", () => navigate("login"));
+  el.querySelector(".entry-enter").addEventListener("click", () => navigate("select"));
 }
