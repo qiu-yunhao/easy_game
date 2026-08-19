@@ -255,6 +255,7 @@ export function renderChat(el) {
         <textarea id="playerInput" rows="4" placeholder="描述你想说什么、做什么……"></textarea>
         <div class="composer-actions">
           <span id="chatStatus" class="chat-status"></span>
+          <button id="saveButton" class="button button-ghost" type="button">存档</button>
           <button id="submitButton" class="button button-primary" type="button">发送</button>
         </div>
       </div>
@@ -265,6 +266,7 @@ export function renderChat(el) {
   const input = el.querySelector("#playerInput");
   const jsonPre = el.querySelector("#parserJson");
   const submit = el.querySelector("#submitButton");
+  const saveBtn = el.querySelector("#saveButton");
   const autoToggle = el.querySelector("#autoModeToggle");
   const statusEl = el.querySelector("#chatStatus");
 
@@ -336,9 +338,31 @@ export function renderChat(el) {
     const hasDraft = Boolean(input.value.trim());
     submit.disabled = isBusy || autoActive || !storyInitialized || sceneFinished || !hasDraft;
     input.disabled = isBusy || autoActive || !storyInitialized || sceneFinished;
+    saveBtn.disabled = isBusy || autoActive || !storyInitialized || !appState.activePlayerId;
   };
 
   const setBusy = (next) => { isBusy = next; syncControls(); };
+
+  const handleSave = async () => {
+    if (isBusy || !appState.activePlayerId || !latestState?.story_initialized) return;
+    setBusy(true);
+    setStatus("正在存档…");
+    try {
+      const result = await api.save({
+        user_id: appState.userId,
+        player_id: appState.activePlayerId,
+        save_kind: "manual",
+        save_label: `${appState.username || "修士"} / 手动存档`,
+      });
+      if (result?.state) renderState(result.state);
+      setStatus(`已存档：${result?.player?.slot_name || `#${appState.activePlayerId}`}`);
+    } catch (error) {
+      setStatus(error.message || "存档失败。");
+    } finally {
+      setBusy(false);
+      syncControls();
+    }
+  };
 
   const handleSubmit = async () => {
     if (isBusy) return;
@@ -434,6 +458,7 @@ export function renderChat(el) {
   el.querySelector("#pickTemplateBtn").addEventListener("click", () =>
     openTemplatePicker(() => refreshTemplateTag()));
   submit.addEventListener("click", handleSubmit);
+  saveBtn.addEventListener("click", handleSave);
   input.addEventListener("input", syncControls);
   input.addEventListener("keydown", (event) => {
     if (event.isComposing) return;

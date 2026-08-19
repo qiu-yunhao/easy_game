@@ -28,14 +28,40 @@ export function renderLogin(el) {
       const { user } = await api.ensureUser(el.querySelector("#usernameInput").value.trim());
       appState.userId = user.id;
       appState.username = user.username;
-      await renderSaves(el);
+      await renderSaves(el, msg);
       el.querySelector("#saveHub").hidden = false;
       msg.textContent = "已连接，可选择存档或直接进入。";
     } catch (e) { msg.textContent = e.message; }
   });
 }
 
-async function renderSaves(el) {
+async function loadAndEnter(playerId, msg) {
+  msg.textContent = "正在载入存档…";
+  try {
+    const loaded = await api.load({ user_id: appState.userId, player_id: playerId });
+    appState.activePlayerId = loaded.player?.id ?? playerId;
+    navigate("select");
+  } catch (e) {
+    msg.textContent = `载入存档失败：${e.message}`;
+  }
+}
+
+async function createAndEnter(msg) {
+  msg.textContent = "正在新开一局…";
+  try {
+    const result = await api.newGame({
+      user_id: appState.userId,
+      slot_name: `${appState.username || "修士"} 的仙途`,
+      selected_template_id: appState.selectedTemplateId ?? null,
+    });
+    appState.activePlayerId = result.player?.id ?? null;
+    navigate("select");
+  } catch (e) {
+    msg.textContent = `新开一局失败：${e.message}`;
+  }
+}
+
+async function renderSaves(el, msg) {
   const { players } = await api.listPlayers(appState.userId);
   const list = el.querySelector("#saveSlotList");
   if (!players.length) {
@@ -46,11 +72,8 @@ async function renderSaves(el) {
       `<button class="save-slot" data-pid="${esc(p.id)}">${esc(p.slot_name || "存档")} · #${esc(p.id)}</button>`
     ).join("") + `<button id="enterNew" class="button button-ghost" type="button">再开一局</button>`;
     list.querySelectorAll(".save-slot").forEach(b =>
-      b.addEventListener("click", () => {
-        appState.activePlayerId = Number(b.dataset.pid);
-        navigate("select");
-      }));
+      b.addEventListener("click", () => loadAndEnter(Number(b.dataset.pid), msg)));
   }
   const en = list.querySelector("#enterNew");
-  if (en) en.addEventListener("click", () => navigate("select"));
+  if (en) en.addEventListener("click", () => createAndEnter(msg));
 }
