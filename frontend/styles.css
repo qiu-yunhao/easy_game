@@ -1479,3 +1479,10 @@ textarea {
 .tpl-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px}
 .tpl-card{padding:12px;border:1px solid #33415580;border-radius:8px;background:transparent;color:inherit;cursor:pointer;text-align:left}
 .tpl-card.is-active{border-color:#4a6bff;background:#2b3a5b55}
+.tpl-workspace{display:grid;grid-template-columns:minmax(240px,340px) 1fr;gap:16px}
+.tpl-upload{border:1px dashed #6b5a3b;border-radius:10px;padding:16px;display:flex;flex-direction:column;gap:10px;height:fit-content}
+.tpl-upload h3,.tpl-list h3{margin:0 0 4px}
+.tpl-upload input[type=text]{padding:8px}
+.tpl-progress{font-size:12px;opacity:.75;margin:0}
+.modal-large{width:80vw;height:80vh;display:flex;flex-direction:column}
+.modal-large .modal-body{flex:1;overflow:auto;padding:8px 4px}
