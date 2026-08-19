@@ -700,6 +700,24 @@ class WebGameSession:
         self._reset_auto_mode_flags_unlocked()
         if initialize_story:
             self._initialize_story()
+            self._inject_template_plot_beats_unlocked()
+
+    def _inject_template_plot_beats_unlocked(self) -> None:
+        if self.selected_template_id is None or self._story_template_service is None:
+            self.state["plot"]["template_plot_beats"] = []
+            return
+        chapter_hint = str(self.state["plot"].get("current_chapter_title", "") or "")
+        try:
+            beats = self._story_template_service.suggest_plot_beats(
+                self.selected_template_id, query=chapter_hint, top_k=5,
+            )
+        except Exception:
+            self.state["plot"]["template_plot_beats"] = []
+            return
+        self.state["plot"]["template_plot_beats"] = [
+            {"label": b.get("label", ""), "summary": b.get("summary", "")}
+            for b in beats
+        ]
 
     def _reload_dependencies(self) -> None:
         self.deps = build_graph_dependencies(

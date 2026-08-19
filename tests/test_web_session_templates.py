@@ -62,5 +62,19 @@ class ResetAndSnapshotTemplateTest(unittest.TestCase):
         self.assertEqual(session.selected_template_id, 1)
 
 
+class TemplateInjectionTest(unittest.TestCase):
+    def test_selected_template_injects_plot_beats_on_reset(self):
+        session = _session_with_fake()
+        session.reset(player_profile={"name": "玩家"}, selected_template_id=1)
+        beats = session.state["plot"].get("template_plot_beats")
+        self.assertTrue(beats)
+        self.assertEqual(beats[0]["label"], "闯宫")
+
+    def test_no_template_leaves_plot_beats_empty(self):
+        session = _session_with_fake()
+        session.reset(player_profile={"name": "玩家"})
+        self.assertIn(session.state["plot"].get("template_plot_beats", []), ([], None))
+
+
 if __name__ == "__main__":
     unittest.main()
