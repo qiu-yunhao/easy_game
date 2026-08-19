@@ -67,7 +67,7 @@ class ComponentFactory:
         return self._build_component("Actor.L1ActorAgent", "L1ActorAgent", **kwargs)
 
     def build_actor_create_agent(self, **kwargs: object) -> "ActorCreateAgent":
-        return self._build_component("actor_create_agent", "ActorCreateAgent", **kwargs)
+        return self._build_component("Actor.ActorCreateAgent", "ActorCreateAgent", **kwargs)
 
     def build_semantic_parser_agent(self, **kwargs: object) -> "SemanticParserAgent":
         return self._build_component("PlayerControl.SemanticParserAgent", "SemanticParserAgent", **kwargs)
