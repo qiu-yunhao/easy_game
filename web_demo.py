@@ -163,7 +163,12 @@ def main() -> int:
 
     template_mysql = os.environ.get("MYSQL_URL", "")
     template_pg = os.environ.get("PG_URL", "")
-    _maybe_setup_story_template(session, mysql_url=template_mysql, pg_url=template_pg)
+    template_enabled = False
+    try:
+        _maybe_setup_story_template(session, mysql_url=template_mysql, pg_url=template_pg)
+        template_enabled = bool(str(template_mysql).strip() and str(template_pg).strip())
+    except Exception as exc:  # noqa: BLE001 - 模板库故障仅降级,不拖垮主服务
+        print(f"情节模板：启动失败已降级 -> {exc}", flush=True)
 
     server = web_server.StageboundHTTPServer(
         (args.host, args.port),
@@ -176,6 +181,7 @@ def main() -> int:
     print(f"玩家角色：{args.player_character}")
     print("数据库模式：未启用（仅内存会话）" if save_store is None else f"数据库模式：已启用 -> {args.database_url}")
     print("回忆模式：未启用" if recall_indexer is None else f"回忆模式：已启用 -> {recall_url}")
+    print("情节模板：未启用" if not template_enabled else "情节模板：已启用")
 
     try:
         server.serve_forever()
