@@ -9,6 +9,7 @@ from pathlib import Path
 from Narrator.NarrationPresets import DEFAULT_NARRATION_STYLE_PRESET, NARRATION_STYLE_GUIDANCE
 import web_server
 import web_session
+from StoryTemplate.factory import build_story_template_service
 
 try:
     from Persistence.Store import GameSaveStore
@@ -97,6 +98,15 @@ def _setup_recall(session, *, save_database, recall_url: str) -> object | None:
     return indexer
 
 
+def _maybe_setup_story_template(session, *, mysql_url: str, pg_url: str) -> None:
+    if not (str(mysql_url).strip() and str(pg_url).strip()):
+        return
+    service = build_story_template_service(
+        mysql_url=str(mysql_url).strip(), pg_url=str(pg_url).strip(),
+    )
+    session.bind_story_template_service(service)
+
+
 def main() -> int:
     load_project_dotenv()
     args = parse_args()
@@ -150,6 +160,10 @@ def main() -> int:
         except Exception as exc:
             print(f"Stagebound 回忆功能初始化失败（已降级为未启用）：{exc}", flush=True)
             recall_indexer = None
+
+    template_mysql = os.environ.get("MYSQL_URL", "")
+    template_pg = os.environ.get("PG_URL", "")
+    _maybe_setup_story_template(session, mysql_url=template_mysql, pg_url=template_pg)
 
     server = web_server.StageboundHTTPServer(
         (args.host, args.port),
