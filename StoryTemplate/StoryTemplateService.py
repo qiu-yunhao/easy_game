@@ -83,6 +83,18 @@ class StoryTemplateService:
     def get_style_bible(self, template_id: int) -> StyleBible:
         return self._repo.get_style_bible(template_id)
 
+    def list_templates(self) -> list[dict]:
+        return self._repo.list_templates()
+
+    def get_template_detail(self, template_id: int) -> dict:
+        return {
+            "template_id": template_id,
+            "style_bible": self._repo.get_style_bible(template_id),
+            "characters": self._repo.get_characters(template_id),
+            "beats": self._repo.get_beats(template_id),
+            "skeleton": self._repo.get_skeleton(template_id),
+        }
+
     def suggest_plot_beats(self, template_id: int, *, query: str, top_k: int = 5) -> list[PlotBeat]:
         beats = self._repo.get_beats(template_id)
         q = (query or "").strip()

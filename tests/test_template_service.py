@@ -83,6 +83,23 @@ class ServiceEndToEndTests(unittest.TestCase):
         self.assertTrue(passages)
         self.assertTrue(any("皇宫" in p or "韦小宝" in p for p in passages))
 
+    def test_list_templates_and_detail(self):
+        mysql_url, pg_url = _urls()
+        service = build_story_template_service(
+            mysql_url=mysql_url, pg_url=pg_url, client=_ScriptedClient(),
+        )
+        tid = service.import_novel(
+            source_title="列表用例", text="第一回 甲\n甲混入皇宫。",
+        )
+        rows = service.list_templates()
+        self.assertTrue(any(r["template_id"] == tid for r in rows))
+
+        detail = service.get_template_detail(tid)
+        self.assertIn("style_bible", detail)
+        self.assertIn("beats", detail)
+        self.assertIn("skeleton", detail)
+        self.assertIn("古雅", detail["style_bible"]["tone_tags"])
+
     def test_tenant_isolation_on_passages(self):
         mysql_url, pg_url = _urls()
         service = build_story_template_service(
