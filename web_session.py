@@ -186,6 +186,7 @@ class SessionConfig:
     player_character: str = PLAYER_CHARACTER_ID
     player_profile: dict[str, Any] | None = None
     narration_style_preset: str = DEFAULT_NARRATION_STYLE_PRESET
+    selected_template_id: int | None = None
 
 
 class WebGameSession:
@@ -193,6 +194,8 @@ class WebGameSession:
         self.config = config or SessionConfig()
         self.config.narration_style_preset = resolve_narration_style_preset(self.config.narration_style_preset)
         self._lock = threading.Lock()
+        self._story_template_service = None
+        self.selected_template_id: int | None = self.config.selected_template_id
         self._player_interface = BufferedPlayerInterface()
         self.save_store: GameSaveStore | None = None
         self.active_user_id: int | None = None
@@ -306,6 +309,35 @@ class WebGameSession:
 
     def _list_players_for_user_unlocked(self, user_id: int) -> list[dict[str, Any]]:
         return self._require_save_store_unlocked().list_players_for_user(user_id)
+
+    def bind_story_template_service(self, service) -> None:
+        with self._lock:
+            self._story_template_service = service
+
+    def _require_template_service_unlocked(self):
+        if self._story_template_service is None:
+            raise RuntimeError("情节模板服务未配置，请检查数据库与向量库连接。")
+        return self._story_template_service
+
+    def list_templates(self) -> list[dict[str, Any]]:
+        with self._lock:
+            return self._require_template_service_unlocked().list_templates()
+
+    def get_template_detail(self, template_id: int) -> dict[str, Any]:
+        with self._lock:
+            return self._require_template_service_unlocked().get_template_detail(template_id)
+
+    def import_template(self, *, source_title: str, text: str, user_id: int = 0) -> int:
+        with self._lock:
+            return self._require_template_service_unlocked().import_novel(
+                source_title=source_title, text=text, user_id=user_id,
+            )
+
+    def set_selected_template(self, template_id: int | None) -> dict[str, Any]:
+        with self._lock:
+            self.selected_template_id = int(template_id) if template_id is not None else None
+            self.config.selected_template_id = self.selected_template_id
+            return self.serialize_state()
 
     def save_player_session(
         self,
