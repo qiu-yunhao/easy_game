@@ -218,6 +218,7 @@ class WebGameSession:
         player_character: str | None = None,
         player_profile: dict[str, Any] | None = None,
         narration_style_preset: str | None = None,
+        selected_template_id: int | None = None,
     ) -> dict[str, Any]:
         with self._lock:
             for field, value in (
@@ -229,6 +230,9 @@ class WebGameSession:
                     setattr(self.config, field, value)
             if narration_style_preset is not None:
                 self.config.narration_style_preset = resolve_narration_style_preset(narration_style_preset)
+            if selected_template_id is not None:
+                self.selected_template_id = int(selected_template_id)
+                self.config.selected_template_id = self.selected_template_id
             self.last_handoff_reason = "设定已更新，正在重建开场场景。"
             self._rebuild_session(initialize_story=True)
             return self.serialize_state()
@@ -421,6 +425,7 @@ class WebGameSession:
             "state": state,
             "character_profiles": profiles,
             "scene_config": _json_clone(self.scene_config),
+            "selected_template_id": self.selected_template_id,
         }
 
     def load_runtime_snapshot(self, snapshot: dict[str, Any]) -> dict[str, Any]:
@@ -454,6 +459,8 @@ class WebGameSession:
         self.state = _json_clone(state)
         self._reload_dependencies()
         self.story_initialized = bool(session_meta.get("story_initialized", False))
+        self.selected_template_id = snapshot.get("selected_template_id")
+        self.config.selected_template_id = self.selected_template_id
         self.last_handoff_reason = str(session_meta.get("last_handoff_reason") or "已从数据库存档恢复。")
         self._reset_auto_mode_flags_unlocked()
         return self.serialize_state()
@@ -842,6 +849,7 @@ class WebGameSession:
             },
             "parser_status": _resolve_parser_status(self.story_initialized, state),
         }
+        payload["selected_template_id"] = self.selected_template_id
         payload["prompt_templates"] = _build_prompt_templates(payload)
         return payload
 

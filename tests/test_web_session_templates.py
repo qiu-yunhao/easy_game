@@ -44,5 +44,23 @@ class SelectedTemplateStateTest(unittest.TestCase):
         self.assertEqual(session.import_template(source_title="t", text="x", user_id=0), 42)
 
 
+class ResetAndSnapshotTemplateTest(unittest.TestCase):
+    def test_reset_accepts_selected_template_id(self):
+        session = _session_with_fake()
+        session.reset(player_profile={"name": "玩家"}, selected_template_id=1)
+        self.assertEqual(session.selected_template_id, 1)
+        state = session.get_state()
+        self.assertEqual(state["selected_template_id"], 1)
+
+    def test_snapshot_roundtrips_selected_template(self):
+        session = _session_with_fake()
+        session.set_selected_template(1)
+        snap = session.export_runtime_snapshot()
+        self.assertEqual(snap["selected_template_id"], 1)
+        session.set_selected_template(None)
+        session.load_runtime_snapshot(snap)
+        self.assertEqual(session.selected_template_id, 1)
+
+
 if __name__ == "__main__":
     unittest.main()
