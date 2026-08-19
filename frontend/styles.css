@@ -1439,3 +1439,10 @@ textarea {
 .save-slot-list{display:flex;flex-direction:column;gap:8px}
 .save-slot{text-align:left;padding:12px}
 .login-msg{opacity:.7;margin-top:12px}
+.select-shell{display:flex;min-height:100vh}
+.sidebar{width:120px;flex:0 0 120px;background:#141b2b;display:flex;flex-direction:column;padding:12px 8px;gap:8px}
+.sidebar-brand{font-weight:600;font-size:13px;padding:4px 6px 10px;opacity:.9}
+.side-item{text-align:left;padding:8px;border-radius:8px;background:transparent;border:0;color:inherit;cursor:pointer;font-size:13px}
+.side-item.is-active{background:#2b3a5b}
+.sidebar-user{margin-top:auto;font-size:11px;opacity:.7;padding:8px 6px;border-top:1px solid #2b3a5b}
+.workspace{flex:1;padding:16px;overflow:auto}
