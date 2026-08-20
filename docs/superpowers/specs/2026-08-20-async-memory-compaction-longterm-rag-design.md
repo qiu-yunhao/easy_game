@@ -23,6 +23,26 @@
 - 压缩过的记忆作为**长期记忆**存入 RAG 向量库（pgvector）。
 - 长期记忆既**写**（压缩块 → pgvector）也**查**（召回旧块，作为一等记忆注入各 Agent 视图）。
 
+## 当前记忆结构（核对后的现状 vs 目标态）
+
+短期记忆是**一份全量 + 一个游标**，不是两个并列队列：
+
+- **原始消息**：`state["history"]`——全部 `HistoryItem`，现状**永不删除**（全量留存）。
+- **压缩块**：`state["memory"]["scene_memory"]["compressed_blocks"]`（`CompressedHistoryBlock` 列表）。
+- **游标**：`state["memory"]["last_compressed_turn"]`——`turn > last_compressed_turn` 即「未压缩」。
+
+现状与目标态的差异（本设计要补的行为）：
+
+| 行为 | 现状 | 目标态（本设计） |
+|------|------|------------------|
+| 未压缩数 ≥30 触发压缩 | 有（但 trigger 误设为 1） | 修正为 30 |
+| 压缩结果落 `compressed_blocks` | 有 | 保持 |
+| 压缩后删除 `history` 已压缩原始项 | **无**（原始项原封留着） | **新增**：压缩成功回调删除 `turn ≤ new_last_compressed_turn` 的 history 项 |
+| 压缩块写 RAG | **无**（只进内存） | **新增**：同时 upsert pgvector |
+| 块内 `raw_items` 副本 | 保留 | **保留**（high 价值块靠它留逐字原文，删 history 不清块内副本） |
+
+因此用户描述的「原始满 30 压缩、压缩后移出原始、写入 RAG」是**目标态**，其中「移出原始」和「写 RAG」是当前代码没有、本次新增的。
+
 ## 已确认的范围决策
 
 | 决策点 | 选择 |
@@ -73,7 +93,7 @@
 - `enqueue(snapshot)`：轮末非阻塞投递当前状态快照（含待压缩项 + 打分/摘要所需上下文）。快照隔离：后台只读快照，不碰活 state。
 - 后台 `_process`：打分（1 LLM）+ 分块摘要（每 mid/low 块 1 LLM）→ 生成 `CompressedHistoryBlock` → `build_block_docs` → upsert pgvector。
 - 成功：把 `(new_blocks, new_last_compressed_turn)` 放入 `pending_result` 槽（带锁）。失败：记日志，不写 pending，可下轮重试。
-- `join()`：无超时阻塞，轮首调用；取走 `pending_result`，合并进活 state 的 `compressed_blocks`，推进 `last_compressed_turn`，并**此时**才把已成功压缩的原始 history 项移出短期（成功后移出）。
+- `join()`：无超时阻塞，轮首调用；取走 `pending_result`，合并进活 state 的 `compressed_blocks`，推进 `last_compressed_turn`，并**此时**执行移出回调——从 `state["history"]` 删除 `turn ≤ new_last_compressed_turn` 的已压缩原始项（成功后才移出）。**块内 `raw_items` 副本保留**：high 价值块（`kind="raw"`）靠它保留逐字原文，只删 `history` 队列、不清块内副本。
 
 ## 单元 3：build_block_docs（压缩块 → VectorDoc）
 

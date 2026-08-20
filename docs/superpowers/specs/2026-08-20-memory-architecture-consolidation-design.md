@@ -105,13 +105,32 @@
 - `compression_trigger_size` 1 → 30；`summary_horizon_turns` → 45。
 - 压缩挪后台（仿 `AsyncSceneIndexer`）：轮末 snapshot enqueue → 后台打分+摘要+写 RAG → 下轮轮首无超时 join，合并结果、推进游标、删除 `state["history"]` 已压缩原始项（**成功后才删**；块内 `raw_items` 副本保留）。
 
+### 4.6 记忆写入收归 Factory（读写分离 + 纯函数风格）
+
+现状：记忆的**写入**分散三处——(a) `ActorRuntime._apply_memory_updates` 直接 mutate `state.characters[id].memory`；(b) `HistoryManager.build_memory` 派生压缩块/视图；(c) `Persistence/Store` 整体序列化 `state`。收敛目标：把记忆写入统一由 Factory 侧一个**写管理器**管，读侧 `DefaultActorMemoryProvider` 维持只读不变。
+
+- **读写分离（已定稿）**：保留 `DefaultActorMemoryProvider`（读，`build()`）及其「必须只读」协议不动；**新增独立写管理器 `MemoryStore`**（Memory 模块下），与 provider 并列挂 `GraphDependencies`。「Factory」概念 = 读 provider + 写 store 两个协作对象，职责清晰。
+- **纯函数风格（已定稿）**：`MemoryStore` 的写方法一律 `(state, ...) -> state 片段/新 state`，**不持有记忆状态、不内部 mutate**。调用方（ActorRuntime / 压缩 hook / 存档层）负责把返回片段合回 state。与现有 LangGraph immutable 风格、以及 `insert_snapshot` 整体序列化 `state` 的存档层完全兼容。
+
+收归的三条写入路径：
+
+| 写入路径 | 现状入口 | 收归后 | 备注 |
+|----------|----------|--------|------|
+| **玩家印象** | `ActorRuntime._apply_memory_updates`→`_append_player_memory` 直接改 `state.characters` | `MemoryStore.record_player_impression(state, actor_id, event) -> new_characters` | 仅 L1 生效；ActorRuntime 只调用、不再手搓 `state.characters` mutation |
+| **压缩块/视图派生** | `HistoryManager.build_memory` | `MemoryStore.compact(state) -> (blocks, new_last)` + `MemoryStore.derive_views(state, blocks) -> memory_state`（与步骤 2 的 `compact_snapshot`/`derive_views` 同一份，落到 MemoryStore 名下） | 步骤 2 的后台压缩改调 MemoryStore；HistoryManager 保留纯算子被 MemoryStore 复用 |
+| **存档序列化** | `Persistence/store_sync.insert_snapshot` 整体 `clone_json(state)` | `MemoryStore.serialize_memory(state) -> dict` / `MemoryStore.deserialize_memory(dict) -> memory 片段`，存档层调 MemoryStore 取记忆片段 | 记忆片段的形状收敛后由 MemoryStore 定义，存档层不再直接理解记忆内部结构 |
+
+- **不收归**：RAG 向量写（`compressed_blocks`→pgvector）仍留在 `AsyncMemoryCompactor`（步骤 3），不进 MemoryStore——向量索引是外部副作用、异步、可失败重试，与「记忆状态的纯函数写」性质不同。
+- **依赖注入**：`MemoryStore` 与 `DefaultActorMemoryProvider` 一样可注入、可 mock，挂 `GraphDependencies`（如 `deps.memory_store`）。
+
 ---
 
 ## 五、实现分步（初步，待定稿后细化）
 
-- **步骤 1｜记忆工厂收敛**：角色两级；工厂输出三部分记忆；删除 `CharacterMemoryState` 的 long/consolidated/short 队列 + `ActorRuntime` 维护逻辑；`state.characters` 瘦身为「id + 角色信息 + 玩家印象(L1)」。导演执导字段承接原主观定位。
-- **步骤 2｜异步压缩**：修常量、压缩挪后台、跨轮 join、成功后删原始项。解决 4.3s 延迟。
-- **步骤 3｜RAG 写入+召回**：compressed_blocks 写 memory_block（带 on_stage metadata）、召回接链路 A retrieved（归属过滤 + turn 去重），仅 L1 启用长期召回。
+- **步骤 1｜记忆工厂收敛**：角色两级；工厂输出三部分记忆；删除 `CharacterMemoryState` 的 long/consolidated/short 队列 + `ActorRuntime` 维护逻辑；`state.characters` 瘦身为「id + 角色信息 + 玩家印象(L1)」。导演执导字段承接原主观定位。**新增 `MemoryStore`（读写分离的写侧），玩家印象写入改由 `MemoryStore.record_player_impression` 纯函数处理，ActorRuntime 只调用。**
+- **步骤 2｜异步压缩**：修常量、压缩挪后台、跨轮 join、成功后删原始项。解决 4.3s 延迟。**压缩/派生纯算子（`compact`/`derive_views`）落 `MemoryStore` 名下，后台压缩调 MemoryStore。**
+- **步骤 3｜RAG 写入+召回**：compressed_blocks 写 memory_block（带 on_stage metadata）、召回接链路 A retrieved（归属过滤 + turn 去重），仅 L1 启用长期召回。（向量写留在 AsyncMemoryCompactor，不进 MemoryStore。）
+- **步骤 4｜存档序列化收归**：`MemoryStore.serialize_memory`/`deserialize_memory` 定义记忆片段形状，`Persistence` 存档层改调 MemoryStore 存取记忆片段，不再直接理解记忆内部结构。
 
 ---
 
