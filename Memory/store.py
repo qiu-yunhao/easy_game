@@ -1,6 +1,11 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, Any
+
 from GameplayTuning import RelationshipTuning
+
+if TYPE_CHECKING:
+    from History.HistoryManager import HistoryManager, MemoryState
 
 
 def _clamp_relationship(value: float, tuning: RelationshipTuning) -> float:
@@ -10,9 +15,34 @@ def _clamp_relationship(value: float, tuning: RelationshipTuning) -> float:
 class MemoryStore:
     """写侧记忆管理器(spec 4.6)。纯函数:接收 state/记忆片段,返回新片段。
 
-    读侧仍在 DefaultActorMemoryProvider。本类从不 mutate 入参,也不持有任何记忆状态。
-    逻辑逐字搬移自 Actor/ActorRuntime.py 的 _append_player_memory + _clamp_relationship。
+    读侧仍在 DefaultActorMemoryProvider。record_player_impression 从不 mutate 入参,
+    也不持有任何记忆状态。逻辑逐字搬移自 Actor/ActorRuntime.py 的
+    _append_player_memory + _clamp_relationship。
+
+    压缩与视图派生(spec 4.6「工厂写侧」)委托给持有的 HistoryManager,
+    本类不重复计算逻辑,只作为守护线程/轮首 hook 的写侧 API。
     """
+
+    def __init__(self, history_manager: "HistoryManager | None" = None) -> None:
+        self._history_manager = history_manager
+
+    def compact(self, state: dict[str, object]) -> tuple[list[dict[str, Any]], int]:
+        """委托 HistoryManager.compact_snapshot,返回 (all_blocks, new_last_compressed_turn)。"""
+        assert self._history_manager is not None, (
+            "MemoryStore.compact requires a history_manager; construct with "
+            "MemoryStore(history_manager=...)"
+        )
+        return self._history_manager.compact_snapshot(state)
+
+    def derive_views(
+        self, state: dict[str, object], blocks: list[dict[str, Any]]
+    ) -> "MemoryState":
+        """委托 HistoryManager.derive_views,从已压缩的 blocks 派生各智能体记忆视图。"""
+        assert self._history_manager is not None, (
+            "MemoryStore.derive_views requires a history_manager; construct with "
+            "MemoryStore(history_manager=...)"
+        )
+        return self._history_manager.derive_views(state, blocks)
 
     def record_player_impression(
         self,
