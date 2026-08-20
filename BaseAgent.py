@@ -1,14 +1,19 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
+import time
 from collections.abc import Sequence
 from typing import Any, TypedDict
 
 from dotenv import load_dotenv
 
 from PromptUtils import render_json_instruction
+
+
+llm_perf_logger = logging.getLogger("llm.perf")
 
 try:
     from openai import OpenAI
@@ -28,6 +33,11 @@ DEFAULT_NETWORK_TIMEOUT_SECONDS = 300
 
 
 class BaseAgent:
+    # 记住每个 endpoint 是否支持结构化 response_format(json_schema)。
+    # 首次探测到 unavailable 后缓存,后续同 endpoint 直接走 fallback,
+    # 省掉「必失败的第一趟请求」。key = base_url。
+    _response_format_unsupported: set[str] = set()
+
     def __init__(
         self,
         base_url: str | None = None,
@@ -72,6 +82,27 @@ class BaseAgent:
         history: Sequence[AgentMessage] | None = None,
         response_format: str | dict[str, Any] | None = None,
     ) -> Any:
+        started = time.perf_counter()
+        perf_flags = {"fallback": False, "repair": False}
+        try:
+            return self._command_inner(instruction, history, response_format, perf_flags)
+        finally:
+            elapsed_ms = (time.perf_counter() - started) * 1000.0
+            llm_perf_logger.info(
+                "LLM %s %.0fms%s%s",
+                type(self).__name__,
+                elapsed_ms,
+                " +fallback" if perf_flags["fallback"] else "",
+                " +repair" if perf_flags["repair"] else "",
+            )
+
+    def _command_inner(
+        self,
+        instruction: str,
+        history: Sequence[AgentMessage] | None,
+        response_format: str | dict[str, Any] | None,
+        perf_flags: dict[str, bool],
+    ) -> Any:
         client = self._build_client()
         messages = [
             {
@@ -106,12 +137,10 @@ class BaseAgent:
         elif isinstance(response_format, dict):
             params["response_format"] = response_format
 
-        try:
-            response = client.chat.completions.create(**params)
-        except Exception as exc:
-            if response_format is None or not self._is_response_format_unsupported(exc):
-                raise
+        endpoint = self.base_url or ""
 
+        def _run_fallback() -> Any:
+            perf_flags["fallback"] = True
             fallback_params = dict(params)
             fallback_params.pop("response_format", None)
             fallback_messages = list(messages)
@@ -120,7 +149,21 @@ class BaseAgent:
                 "content": self._build_json_fallback_instruction(instruction, response_format),
             }
             fallback_params["messages"] = fallback_messages
-            response = client.chat.completions.create(**fallback_params)
+            return client.chat.completions.create(**fallback_params)
+
+        structured = response_format is not None and "response_format" in params
+        if structured and endpoint in self._response_format_unsupported:
+            # 已知该 endpoint 不支持结构化 response_format:跳过必失败的第一趟。
+            response = _run_fallback()
+        else:
+            try:
+                response = client.chat.completions.create(**params)
+            except Exception as exc:
+                if response_format is None or not self._is_response_format_unsupported(exc):
+                    raise
+                if endpoint:
+                    self._response_format_unsupported.add(endpoint)
+                response = _run_fallback()
 
         content = response.choices[0].message.content
 
@@ -134,6 +177,7 @@ class BaseAgent:
             return self._parse_json_payload(content)
         except json.JSONDecodeError:
             try:
+                perf_flags["repair"] = True
                 repaired_content = self._repair_json_response(
                     client=client,
                     instruction=instruction,

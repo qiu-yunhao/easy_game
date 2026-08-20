@@ -10,6 +10,7 @@ from CharacterProfile import ensure_character_profile, ensure_character_profiles
 from CharacterRepository import CharacterRepository
 from Graph.builder import (
     initialize_story_session,
+    prepare_chapter_turn,
     prepare_story_setup,
     resolve_story_turn,
 )
@@ -787,6 +788,9 @@ class WebGameSession:
     def _initialize_story(self) -> None:
         if self.config.mode in {"agent-first", "live"}:
             self.state = prepare_story_setup(self.state, self.deps)
+            # 开局就把首场景编排完(seed NPC 上场 + director/scheduler),
+            # 让玩家第一次搭话当场就有 NPC 逐条回应,而不是首回合冷场。
+            self.state = prepare_chapter_turn(self.state, self.deps)
             self.state = self._controller.prime_opening_turn(self.state)
             self.story_initialized = True
             self.last_handoff_reason = "开场交接完成，等待玩家定义第一步行动。"

@@ -32,8 +32,6 @@ def _build_story_cast_signature(state: GameState, deps: "GraphDependencies") -> 
         {
             "chapter_id": str(chapter.get("chapter_id", "") or "").strip(),
             "title": str(chapter.get("title", "") or "").strip(),
-            "main_goal": str(chapter.get("main_goal", "") or "").strip(),
-            "summary": str(chapter.get("summary", "") or "").strip(),
         }
         for chapter in state["plot"].get("story_outline", [])
         if isinstance(chapter, dict)
@@ -41,7 +39,7 @@ def _build_story_cast_signature(state: GameState, deps: "GraphDependencies") -> 
     supplemental_cast = [
         {
             key: serialized_profile[key]
-            for key in ("character_id", "name", "story_role", "planned_chapter_ids")
+            for key in ("character_id", "planned_chapter_ids")
         }
         for character_id, profile in deps.character_profiles.items()
         if str(profile.get("profile_source", "") or "").strip() == "actor_create_agent"
