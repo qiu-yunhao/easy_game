@@ -9,7 +9,7 @@ from Memory.scene_filter import PresenceGranularity, filter_history_by_presence
 
 
 class DefaultActorMemoryProvider:
-    """默认记忆工厂:读 state + 在场过滤 + 组装三层 DTO。只读,不写 state。
+    """默认记忆工厂:读 state + 在场过滤 + 组装只读 DTO(人设 + 在场短期 + 长期召回)。只读,不写 state。
 
     可选注入 recall_service + 租户(user_id/player_id)后,角色说话时会按当前情景
     语义检索本局的相关过往,填入 retrieved。未注入或检索失败时优雅降级为空,
