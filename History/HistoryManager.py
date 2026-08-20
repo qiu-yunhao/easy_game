@@ -55,6 +55,13 @@ class HistoryManager:
     def get_uncompressed_history_count(self, state: GameState) -> int:
         return len(self.get_uncompressed_history_items(state))
 
+    @staticmethod
+    def evict_compressed_history(history: list, new_last_compressed_turn: int) -> list:
+        """Drop history items with turn <= cursor. Block-internal raw_items unaffected."""
+        if new_last_compressed_turn <= 0:
+            return list(history)
+        return [item for item in history if item["turn"] > new_last_compressed_turn]
+
     def compact_snapshot(
         self, state: GameState
     ) -> tuple[list[dict[str, Any]], int]:
