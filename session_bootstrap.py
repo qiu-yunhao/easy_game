@@ -446,28 +446,29 @@ def register_default_hooks(deps: GraphDependencies) -> None:
         manager = deps.history_manager
         store = deps.memory_store
         compactor = deps.memory_compactor
-        if manager is None or store is None:
+        # store 与 compactor 绑定同生死(见 build_runtime_dependencies 同一守卫构造),
+        # 三者缺任一即整体降级,避免「有 store 无 compactor → 压缩永不入队」的静默退化。
+        if manager is None or store is None or compactor is None:
             return state
 
         merged_state = state
         # 轮首:join 上一轮后台压缩结果(若有),合并 blocks + 推进游标 + 驱逐已压缩 history。
-        if compactor is not None:
-            pending = compactor.take_pending()
-            if pending is not None:
-                blocks, new_last = pending
-                evicted_history = manager.evict_compressed_history(state["history"], new_last)
-                merged_state = {
-                    **state,
-                    "history": evicted_history,
-                    "memory": {
-                        **state["memory"],
-                        "scene_memory": {
-                            **state["memory"]["scene_memory"],
-                            "compressed_blocks": blocks,
-                        },
-                        "last_compressed_turn": new_last,
+        pending = compactor.take_pending()
+        if pending is not None:
+            blocks, new_last = pending
+            evicted_history = manager.evict_compressed_history(state["history"], new_last)
+            merged_state = {
+                **state,
+                "history": evicted_history,
+                "memory": {
+                    **state["memory"],
+                    "scene_memory": {
+                        **state["memory"]["scene_memory"],
+                        "compressed_blocks": blocks,
                     },
-                }
+                    "last_compressed_turn": new_last,
+                },
+            }
 
         # 快路径:从现有 blocks 同步 derive Agent 视图(不做压缩),走 store。
         existing_blocks = merged_state["memory"]["scene_memory"]["compressed_blocks"]
@@ -475,7 +476,7 @@ def register_default_hooks(deps: GraphDependencies) -> None:
 
         # policy 判定该压缩 → enqueue 快照到后台(非阻塞)。
         decision = decide_refresh(merged_state, trigger_size=manager.compression_trigger_size)
-        if decision.should_compress and compactor is not None:
+        if decision.should_compress:
             compactor.enqueue(merged_state)
 
         return merged_state
