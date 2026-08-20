@@ -55,7 +55,14 @@ class HistoryManager:
     def get_uncompressed_history_count(self, state: GameState) -> int:
         return len(self.get_uncompressed_history_items(state))
 
-    def build_memory(self, state: GameState) -> MemoryState:
+    def compact_snapshot(
+        self, state: GameState
+    ) -> tuple[list[dict[str, Any]], int]:
+        """Compact uncompressed history into new blocks WITHOUT mutating state.
+
+        Returns (all_blocks, new_last_compressed_turn) where all_blocks is the
+        existing compressed blocks plus any newly produced ones.
+        """
         base_memory = state.get("memory") or empty_memory_state()
         existing_blocks = list(base_memory["scene_memory"]["compressed_blocks"])
         new_history_items = self.get_uncompressed_history_items(state)
@@ -75,9 +82,25 @@ class HistoryManager:
                     summary_result = self._summarize_chunk(state, chunk)
                     compressed_blocks.append(build_summary_block(chunk, summary_result))
 
+        last_compressed_turn = (
+            compressed_blocks[-1]["turn_end"]
+            if compressed_blocks
+            else base_memory["last_compressed_turn"]
+        )
+        return compressed_blocks, last_compressed_turn
+
+    def derive_views(
+        self, state: GameState, blocks: list[dict[str, Any]]
+    ) -> MemoryState:
+        """Derive agent memory views from already-compressed blocks.
+
+        Does NOT compress; only builds the scene/playwright/director/scheduler
+        views (and last_compressed_turn cursor) from the given blocks.
+        """
+        base_memory = state.get("memory") or empty_memory_state()
         scene_memory = build_scene_memory_from_blocks(
             state,
-            compressed_blocks,
+            blocks,
             self.summary_horizon_turns,
         )
         playwright_memory = build_playwright_memory(state, scene_memory)
@@ -88,9 +111,7 @@ class HistoryManager:
             self.scheduler_round_window,
         )
         last_compressed_turn = (
-            compressed_blocks[-1]["turn_end"]
-            if compressed_blocks
-            else base_memory["last_compressed_turn"]
+            blocks[-1]["turn_end"] if blocks else base_memory["last_compressed_turn"]
         )
 
         return {
@@ -100,6 +121,10 @@ class HistoryManager:
             "director_memory": director_memory,
             "scheduler_memory": scheduler_memory,
         }
+
+    def build_memory(self, state: GameState) -> MemoryState:
+        compressed_blocks, _ = self.compact_snapshot(state)
+        return self.derive_views(state, compressed_blocks)
 
     def _score_history_items(
         self,
