@@ -29,7 +29,10 @@ from Actor import apply_resolved_act
 from Graph.contextual_scene_handoffs import apply_contextual_scene_progression
 from Graph.nodes import GraphDependencies
 from History import HistoryManager
+from History.AsyncMemoryCompactor import AsyncMemoryCompactor
+from History.MemoryRefreshPolicy import decide_refresh
 from Memory.default_provider import DefaultActorMemoryProvider
+from Memory.store import MemoryStore
 from Narrator.NarrationPresets import (
     DEFAULT_NARRATION_STYLE_PRESET,
     resolve_narration_style_preset,
@@ -384,7 +387,7 @@ def build_runtime_dependencies(
             recent_rounds=3,
             granularity="on_stage",
         ),
-        history_manager=HistoryManager(compression_trigger_size=1),
+        history_manager=HistoryManager(compression_trigger_size=30, summary_horizon_turns=45),
         gameplay_tuning=GameplayTuning(narration=NarrationTuning(style_preset=narration_style_preset)),
         component_factory=component_factory,
         agent_first=agent_first,
@@ -397,6 +400,10 @@ def build_runtime_dependencies(
             component_names=component_names,
             warm_clients_after_attach=warm_clients_after_attach,
         )
+    if deps.history_manager is not None:
+        deps.memory_store = MemoryStore(history_manager=deps.history_manager)
+        deps.memory_compactor = AsyncMemoryCompactor(memory_store=deps.memory_store)
+        deps.memory_compactor.start()
     register_default_hooks(deps)
     return deps
 
@@ -436,9 +443,42 @@ def register_default_hooks(deps: GraphDependencies) -> None:
         return apply_contextual_scene_progression(state, deps.character_profiles)
 
     def _refresh_history(state):
-        if deps.history_manager is None or not deps.history_manager.should_refresh(state):
+        manager = deps.history_manager
+        store = deps.memory_store
+        compactor = deps.memory_compactor
+        if manager is None or store is None:
             return state
-        return {**state, "memory": deps.history_manager.build_memory(state)}
+
+        merged_state = state
+        # 轮首:join 上一轮后台压缩结果(若有),合并 blocks + 推进游标 + 驱逐已压缩 history。
+        if compactor is not None:
+            pending = compactor.take_pending()
+            if pending is not None:
+                blocks, new_last = pending
+                evicted_history = manager.evict_compressed_history(state["history"], new_last)
+                merged_state = {
+                    **state,
+                    "history": evicted_history,
+                    "memory": {
+                        **state["memory"],
+                        "scene_memory": {
+                            **state["memory"]["scene_memory"],
+                            "compressed_blocks": blocks,
+                        },
+                        "last_compressed_turn": new_last,
+                    },
+                }
+
+        # 快路径:从现有 blocks 同步 derive Agent 视图(不做压缩),走 store。
+        existing_blocks = merged_state["memory"]["scene_memory"]["compressed_blocks"]
+        merged_state = {**merged_state, "memory": store.derive_views(merged_state, existing_blocks)}
+
+        # policy 判定该压缩 → enqueue 快照到后台(非阻塞)。
+        decision = decide_refresh(merged_state, trigger_size=manager.compression_trigger_size)
+        if decision.should_compress and compactor is not None:
+            compactor.enqueue(merged_state)
+
+        return merged_state
 
     registry.register("actor.after", _history_commit)
     registry.register("actor.after", _contextual_progression)
