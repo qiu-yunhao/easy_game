@@ -15,7 +15,7 @@ def _extract_payload(instruction: str) -> dict[str, object]:
 
 
 class DirectorFormatterTierTests(unittest.TestCase):
-    def test_build_instruction_includes_l1_l2_stage_contract_and_grouping(self) -> None:
+    def test_build_instruction_includes_two_tier_stage_contract_and_grouping(self) -> None:
         state = create_initial_game_state(
             plot={
                 "chapter_id": "chapter-1",
@@ -176,21 +176,27 @@ class DirectorFormatterTierTests(unittest.TestCase):
         self.assertIn("character_roster_snapshot", payload)
         self.assertEqual(payload["character_roster_snapshot"]["summary"]["total_L1"], 1)
         self.assertEqual(payload["stage_tiers"]["on_stage_l1"], ["l1_rival"])
-        self.assertEqual(payload["stage_tiers"]["on_stage_l2"], ["l2_guard"])
-        self.assertIn("l2_scribe", payload["stage_tiers"]["available_l2_candidates"])
+        # Two-tier: former L2 roles now fold into the NPC-Actor ("other") bucket.
+        self.assertIn("l2_guard", payload["stage_tiers"]["on_stage_other"])
+        self.assertNotIn("on_stage_l2", payload["stage_tiers"])
+        self.assertIn("l2_scribe", payload["stage_tiers"]["available_other_candidates"])
+        self.assertNotIn("available_l2_candidates", payload["stage_tiers"])
         self.assertEqual(payload["scene_context_snapshot"]["scene"]["on_stage"], ["player", "l1_rival", "l2_guard"])
 
         on_stage_profiles = {item["character_id"]: item for item in payload["characters_on_stage"]}
         self.assertEqual(on_stage_profiles["l1_rival"]["agent_type"], "L1")
         self.assertIn("l1_profile", on_stage_profiles["l1_rival"])
+        # L2 profiles fall through to plain NPC serialization: no dedicated l2 blocks.
         self.assertEqual(on_stage_profiles["l2_guard"]["agent_type"], "L2")
-        self.assertIn("l2_profile", on_stage_profiles["l2_guard"])
-        self.assertIn("scene_support_bias", on_stage_profiles["l2_guard"])
+        self.assertNotIn("l2_profile", on_stage_profiles["l2_guard"])
+        self.assertNotIn("scene_support_bias", on_stage_profiles["l2_guard"])
 
         available_profiles = {item["character_id"]: item for item in payload["available_stage_candidates"]}
         self.assertEqual(available_profiles["l2_scribe"]["agent_type"], "L2")
         self.assertIn("planned_chapter_ids", available_profiles["l2_scribe"])
         self.assertTrue(payload["tiered_directing_contract"]["selection_order"])
+        # L2-specific support rule is gone from the two-tier contract.
+        self.assertNotIn("L2_support_rule", payload["tiered_directing_contract"])
 
 
 if __name__ == "__main__":

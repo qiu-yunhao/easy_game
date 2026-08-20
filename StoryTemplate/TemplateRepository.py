@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy import (
     BigInteger, Column, DateTime, Integer, MetaData, String, Table, Text,
-    insert, select,
+    func, insert, select,
 )
 
 from db import Database
@@ -200,3 +200,39 @@ class TemplateRepository:
             "preconditions": json.loads(r["preconditions"]),
             "maps_to_chapter_hint": r["maps_to_chapter_hint"],
         } for r in rows]
+
+    def list_templates(self) -> list[dict]:
+        beat_count = (
+            select(
+                template_plot_beat.c.template_id.label("tid"),
+                func.count().label("beat_count"),
+            )
+            .group_by(template_plot_beat.c.template_id)
+            .subquery()
+        )
+        with self._database.session() as db:
+            rows = db.execute(
+                select(
+                    story_template.c.template_id,
+                    story_template.c.source_title,
+                    story_template.c.created_at,
+                    func.coalesce(beat_count.c.beat_count, 0).label("beat_count"),
+                )
+                .select_from(
+                    story_template.join(
+                        beat_count,
+                        story_template.c.template_id == beat_count.c.tid,
+                        isouter=True,
+                    )
+                )
+                .order_by(story_template.c.template_id.desc())
+            ).mappings().all()
+        return [
+            {
+                "template_id": int(r["template_id"]),
+                "source_title": r["source_title"],
+                "created_at": r["created_at"].isoformat() if r["created_at"] else "",
+                "beat_count": int(r["beat_count"]),
+            }
+            for r in rows
+        ]

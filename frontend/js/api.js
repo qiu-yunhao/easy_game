@@ -1,0 +1,33 @@
+async function postJson(path, body) {
+  const res = await fetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body || {}),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `请求失败：${res.status}`);
+  return data;
+}
+async function getJson(path) {
+  const res = await fetch(path);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `请求失败：${res.status}`);
+  return data;
+}
+
+export const api = {
+  ensureUser: (username) => postJson("/api/users/ensure", { username }),
+  listPlayers: (userId) => getJson(`/api/players?user_id=${encodeURIComponent(userId)}`),
+  getState: () => getJson("/api/state"),
+  action: (input) => postJson("/api/action", { input }),
+  setAuto: (enabled) => postJson("/api/auto", { enabled }),
+  autoStep: (maxBeats) => postJson("/api/auto/step", { max_beats: maxBeats }),
+  reset: (payload) => postJson("/api/reset", payload),
+  newGame: (payload) => postJson("/api/new-game", payload),
+  save: (payload) => postJson("/api/save", payload),
+  load: (payload) => postJson("/api/load", payload),
+  listTemplates: () => getJson("/api/templates"),
+  templateDetail: (id) => getJson(`/api/templates/${id}`),
+  importTemplate: (payload) => postJson("/api/templates/import", payload),
+  selectTemplate: (templateId) => postJson("/api/templates/select", { template_id: templateId }),
+};

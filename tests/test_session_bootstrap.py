@@ -137,10 +137,6 @@ class SessionBootstrapTests(unittest.TestCase):
                 del kwargs
                 return self._build_named_agent("actor_agent")
 
-            def build_l2_actor_agent(self, **kwargs):
-                del kwargs
-                return self._build_named_agent("l2_actor_agent")
-
             def build_l1_actor_agent(self, **kwargs):
                 del kwargs
                 return self._build_named_agent("l1_actor_agent")
@@ -185,7 +181,6 @@ class SessionBootstrapTests(unittest.TestCase):
                 "actor_create_agent",
                 "director_agent",
                 "actor_agent",
-                "l2_actor_agent",
                 "l1_actor_agent",
                 "narrator_agent",
                 "history_summarizer_agent",

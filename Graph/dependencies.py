@@ -37,7 +37,6 @@ class GraphDependencies:
     actor_create_agent: ActorCreateAgent | None = None
     director_agent: DirectorAgent | None = None
     actor_agent: ActorAgent | None = None
-    l2_actor_agent: ActorAgent | None = None
     l1_actor_agent: ActorAgent | None = None
     narrator_agent: NarratorAgent | None = None
     player_intent_planner_agent: "PlayerIntentPlannerAgent | None" = None

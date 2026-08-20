@@ -3,7 +3,7 @@ from __future__ import annotations
 import dataclasses
 import unittest
 
-from Memory.context import ActorMemoryContext, LongTermView
+from Memory.context import ActorMemoryContext
 
 
 class ActorMemoryContextTests(unittest.TestCase):
@@ -12,9 +12,6 @@ class ActorMemoryContextTests(unittest.TestCase):
             actor_id="A",
             persona={"character_id": "A", "name": "甲"},
             short_term=[{"turn": 1, "actor": "A", "mode": "speak", "content": "x"}],
-            long_term=LongTermView(
-                consolidated=[], long_term=[], pinned=[],
-            ),
             retrieved=[],
         )
 
@@ -23,16 +20,10 @@ class ActorMemoryContextTests(unittest.TestCase):
         with self.assertRaises(dataclasses.FrozenInstanceError):
             ctx.actor_id = "B"  # type: ignore[misc]
 
-    def test_long_term_view_is_frozen(self):
-        view = LongTermView(consolidated=[], long_term=[], pinned=[])
-        with self.assertRaises(dataclasses.FrozenInstanceError):
-            view.consolidated = [1]  # type: ignore[misc]
-
     def test_context_holds_references_not_deep_copies(self):
         short = [{"turn": 1, "actor": "A", "mode": "speak", "content": "x"}]
         ctx = ActorMemoryContext(
             actor_id="A", persona={}, short_term=short,
-            long_term=LongTermView(consolidated=[], long_term=[], pinned=[]),
             retrieved=[],
         )
         # 只读投影:持有引用而非深拷贝(引用一致)
@@ -79,43 +70,6 @@ class DefaultActorMemoryProviderTests(unittest.TestCase):
         self.assertEqual([it["turn"] for it in ctx.short_term], [1])
         self.assertEqual(ctx.actor_id, "A")
         self.assertEqual(ctx.persona["name"], "甲")
-
-    def test_build_long_term_reads_character_memory(self):
-        state, profiles = _build_state_with_history()
-        state["characters"]["A"]["memory"]["pinned_long_term_memory"] = [
-            {"turn_recorded": 1, "event_summary": "钉住", "subjective_interpretation": "",
-             "belief_formed": "", "priority": "high", "tags": [],
-             "pin_candidate": True, "pin_reason": "", "linked_characters": []},
-        ]
-        provider = DefaultActorMemoryProvider(character_profiles=profiles)
-        ctx = provider.build("A", state)
-        self.assertEqual(len(ctx.long_term.pinned), 1)
-        self.assertEqual(ctx.long_term.pinned[0]["event_summary"], "钉住")
-
-    def test_build_long_term_lists_decoupled_from_state(self):
-        # 造 state:pinned_long_term_memory 预置一个元素。
-        state, profiles = _build_state_with_history()
-        original = {
-            "turn_recorded": 1, "event_summary": "钉住", "subjective_interpretation": "",
-            "belief_formed": "", "priority": "high", "tags": [],
-            "pin_candidate": True, "pin_reason": "", "linked_characters": [],
-        }
-        state["characters"]["A"]["memory"]["pinned_long_term_memory"] = [original]
-
-        provider = DefaultActorMemoryProvider(character_profiles=profiles)
-        ctx = provider.build("A", state)
-
-        # LongTermView 是 frozen dataclass,但其内部 list 本身可变,append 允许。
-        # 向返回的 DTO 列表增元素,不应回写 state 内部列表(build 时 list(...) 浅拷贝解耦)。
-        injected = {"turn_recorded": 99, "event_summary": "注入", "subjective_interpretation": "",
-                    "belief_formed": "", "priority": "low", "tags": [],
-                    "pin_candidate": False, "pin_reason": "", "linked_characters": []}
-        ctx.long_term.pinned.append(injected)
-
-        state_pinned = state["characters"]["A"]["memory"]["pinned_long_term_memory"]
-        # state 内部列表长度不变、不含新元素——证明顶层增删已隔离。
-        self.assertEqual(len(state_pinned), 1)
-        self.assertNotIn(injected, state_pinned)
 
     def test_build_retrieved_is_empty_placeholder(self):
         state, profiles = _build_state_with_history()

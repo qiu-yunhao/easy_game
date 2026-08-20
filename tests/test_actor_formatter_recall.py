@@ -4,7 +4,7 @@ import unittest
 
 from Actor.ActorFormatter import _build_actor_payload, _format_recalled
 from CharacterProfile import ensure_character_profile
-from Memory.context import ActorMemoryContext, LongTermView
+from Memory.context import ActorMemoryContext
 from datatypes import ScoredDoc, VectorDoc
 
 
@@ -28,7 +28,6 @@ def _ctx(retrieved):
             "agent_type": "actor", "story_layer": "core", "storage_mode": "inline",
         }),
         short_term=[],
-        long_term=LongTermView(consolidated=[], long_term=[], pinned=[]),
         retrieved=retrieved,
     )
 

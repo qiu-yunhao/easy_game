@@ -45,6 +45,18 @@ class StageboundRequestHandler(BaseHTTPRequestHandler):
             user_id = self._as_int(parse_qs(parsed.query).get("user_id", [None])[0], field_name="user_id")
             self._write_json(HTTPStatus.OK, {"players": self.server.session.list_players_for_user(user_id)})
             return
+        if parsed.path == "/api/templates":
+            self._write_json(HTTPStatus.OK, {"templates": self.server.session.list_templates()})
+            return
+        if parsed.path.startswith("/api/templates/"):
+            raw_id = parsed.path.rsplit("/", 1)[-1]
+            try:
+                template_id = int(raw_id)
+            except ValueError:
+                self._write_json(HTTPStatus.BAD_REQUEST, {"error": "模板 id 必须是整数。"})
+                return
+            self._write_json(HTTPStatus.OK, self.server.session.get_template_detail(template_id))
+            return
         self._serve_frontend_asset(parsed.path)
 
     def do_POST(self) -> None:
@@ -214,6 +226,20 @@ class StageboundRequestHandler(BaseHTTPRequestHandler):
             user_id = self._as_int(payload.get("user_id"), field_name="user_id")
             player_id = self._as_int(payload.get("player_id"), field_name="player_id")
             return HTTPStatus.OK, self.server.session.load_player_session(user_id=user_id, player_id=player_id)
+        if path == "/api/templates/import":
+            source_title = str(payload.get("source_title", "") or "")
+            text = str(payload.get("text", "") or "")
+            if not source_title or not text:
+                raise RuntimeError("`source_title` 与 `text` 均为必填。")
+            user_id = self._as_int(payload.get("user_id", 0), field_name="user_id")
+            template_id = self.server.session.import_template(
+                source_title=source_title, text=text, user_id=user_id,
+            )
+            return HTTPStatus.OK, {"template_id": template_id}
+        if path == "/api/templates/select":
+            raw = payload.get("template_id")
+            template_id = None if raw is None else self._as_int(raw, field_name="template_id")
+            return HTTPStatus.OK, self.server.session.set_selected_template(template_id)
         return HTTPStatus.NOT_FOUND, {"error": "未知接口。"}
 
     def _require_save_store(self) -> GameSaveStore:
@@ -230,6 +256,11 @@ class StageboundRequestHandler(BaseHTTPRequestHandler):
             "player_character": str(value) if (value := payload.get("player_character")) is not None else None,
             "player_profile": player_profile,
             "narration_style_preset": str(value) if (value := payload.get("narration_style_preset")) is not None else None,
+            "selected_template_id": (
+                self._as_int(value, field_name="selected_template_id")
+                if (value := payload.get("selected_template_id")) is not None
+                else None
+            ),
         }
 
     def _as_int(self, value: Any, *, field_name: str) -> int:

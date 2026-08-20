@@ -4,12 +4,12 @@ from typing import Any, Mapping, Optional
 
 from CharacterProfile import CharacterProfile, ensure_character_profile
 from GameState import GameState
-from Memory.context import ActorMemoryContext, LongTermView
+from Memory.context import ActorMemoryContext
 from Memory.scene_filter import PresenceGranularity, filter_history_by_presence
 
 
 class DefaultActorMemoryProvider:
-    """默认记忆工厂:读 state + 在场过滤 + 组装三层 DTO。只读,不写 state。
+    """默认记忆工厂:读 state + 在场过滤 + 组装只读 DTO(人设 + 在场短期 + 长期召回)。只读,不写 state。
 
     可选注入 recall_service + 租户(user_id/player_id)后,角色说话时会按当前情景
     语义检索本局的相关过往,填入 retrieved。未注入或检索失败时优雅降级为空,
@@ -54,15 +54,6 @@ class DefaultActorMemoryProvider:
             granularity=self._granularity,
         )
 
-        # 长期:直接复用角色已压缩的记忆字段(不重新压缩)。
-        # 拷成新 list 只是隔离外层增删,元素仍是原引用(只读投影)。
-        memory = state["characters"].get(actor_id, {}).get("memory", {})
-        long_term = LongTermView(
-            consolidated=list(memory.get("consolidated_memory", [])),
-            long_term=list(memory.get("long_term_memory", [])),
-            pinned=list(memory.get("pinned_long_term_memory", [])),
-        )
-
         # 检索词 = 当前 intent + 最近对话;失败/未启用降级为空。
         query = self._compose_recall_query(actor_id, state, short_term)
 
@@ -70,7 +61,6 @@ class DefaultActorMemoryProvider:
             actor_id=actor_id,
             persona=persona,
             short_term=short_term,
-            long_term=long_term,
             retrieved=self.retrieve(
                 actor_id, query, user_id=self._user_id, player_id=self._player_id
             ),

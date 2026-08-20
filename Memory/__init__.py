@@ -7,7 +7,7 @@
 
 from __future__ import annotations
 
-from Memory.context import ActorMemoryContext, LongTermView
+from Memory.context import ActorMemoryContext
 from Memory.default_provider import DefaultActorMemoryProvider
 from Memory.provider import ActorMemoryProvider
 from Memory.scene_filter import (
@@ -17,7 +17,6 @@ from Memory.scene_filter import (
 
 __all__ = [
     "ActorMemoryContext",
-    "LongTermView",
     "ActorMemoryProvider",
     "DefaultActorMemoryProvider",
     "PresenceGranularity",

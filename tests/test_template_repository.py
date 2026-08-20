@@ -70,6 +70,20 @@ class RepositoryRealMysqlTests(unittest.TestCase):
         self.assertEqual([n["order_index"] for n in got_skel], [0, 1])
         self.assertEqual(got_skel[0]["title"], "开端")
 
+    def test_list_templates_returns_saved_with_beat_count(self):
+        sb, chars, beats, skeleton = self._sample()
+        source_title = "鹿鼎记列表测试"
+        tid = self.repo.save_template(
+            user_id=1, source_title=source_title,
+            style_bible=sb, characters=chars, beats=beats, skeleton=skeleton,
+        )
+        rows = self.repo.list_templates()
+        match = [r for r in rows if r["template_id"] == tid]
+        self.assertEqual(len(match), 1)
+        self.assertEqual(match[0]["source_title"], source_title)
+        self.assertEqual(match[0]["beat_count"], len(beats))
+        self.assertIn("created_at", match[0])
+
 
 if __name__ == "__main__":
     unittest.main()

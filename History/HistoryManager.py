@@ -108,7 +108,10 @@ class HistoryManager:
     ) -> list[dict[str, Any]]:
         if self.summarizer_agent is None:
             return heuristic_score_items(history_items)
-        return self.summarizer_agent.score_history_items(score_payload)
+        try:
+            return self.summarizer_agent.score_history_items(score_payload)
+        except (KeyError, TypeError, ValueError):
+            return heuristic_score_items(history_items)
 
     def _summarize_chunk(
         self,
@@ -118,4 +121,7 @@ class HistoryManager:
         if self.summarizer_agent is None:
             return heuristic_chunk_summary(chunk)
         payload = summarize_chunk_payload(state, chunk)
-        return self.summarizer_agent.summarize_chunk(payload)
+        try:
+            return self.summarizer_agent.summarize_chunk(payload)
+        except (KeyError, TypeError, ValueError):
+            return heuristic_chunk_summary(chunk)

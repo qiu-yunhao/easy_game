@@ -10,6 +10,7 @@ from CharacterProfile import ensure_character_profile, ensure_character_profiles
 from CharacterRepository import CharacterRepository
 from Graph.builder import (
     initialize_story_session,
+    prepare_chapter_turn,
     prepare_story_setup,
     resolve_story_turn,
 )
@@ -186,6 +187,7 @@ class SessionConfig:
     player_character: str = PLAYER_CHARACTER_ID
     player_profile: dict[str, Any] | None = None
     narration_style_preset: str = DEFAULT_NARRATION_STYLE_PRESET
+    selected_template_id: int | None = None
 
 
 class WebGameSession:
@@ -193,6 +195,8 @@ class WebGameSession:
         self.config = config or SessionConfig()
         self.config.narration_style_preset = resolve_narration_style_preset(self.config.narration_style_preset)
         self._lock = threading.Lock()
+        self._story_template_service = None
+        self.selected_template_id: int | None = self.config.selected_template_id
         self._player_interface = BufferedPlayerInterface()
         self.save_store: GameSaveStore | None = None
         self.active_user_id: int | None = None
@@ -215,6 +219,7 @@ class WebGameSession:
         player_character: str | None = None,
         player_profile: dict[str, Any] | None = None,
         narration_style_preset: str | None = None,
+        selected_template_id: int | None = None,
     ) -> dict[str, Any]:
         with self._lock:
             for field, value in (
@@ -226,6 +231,9 @@ class WebGameSession:
                     setattr(self.config, field, value)
             if narration_style_preset is not None:
                 self.config.narration_style_preset = resolve_narration_style_preset(narration_style_preset)
+            if selected_template_id is not None:
+                self.selected_template_id = int(selected_template_id)
+                self.config.selected_template_id = self.selected_template_id
             self.last_handoff_reason = "设定已更新，正在重建开场场景。"
             self._rebuild_session(initialize_story=True)
             return self.serialize_state()
@@ -306,6 +314,35 @@ class WebGameSession:
 
     def _list_players_for_user_unlocked(self, user_id: int) -> list[dict[str, Any]]:
         return self._require_save_store_unlocked().list_players_for_user(user_id)
+
+    def bind_story_template_service(self, service) -> None:
+        with self._lock:
+            self._story_template_service = service
+
+    def _require_template_service_unlocked(self):
+        if self._story_template_service is None:
+            raise RuntimeError("情节模板服务未配置，请检查数据库与向量库连接。")
+        return self._story_template_service
+
+    def list_templates(self) -> list[dict[str, Any]]:
+        with self._lock:
+            return self._require_template_service_unlocked().list_templates()
+
+    def get_template_detail(self, template_id: int) -> dict[str, Any]:
+        with self._lock:
+            return self._require_template_service_unlocked().get_template_detail(template_id)
+
+    def import_template(self, *, source_title: str, text: str, user_id: int = 0) -> int:
+        with self._lock:
+            return self._require_template_service_unlocked().import_novel(
+                source_title=source_title, text=text, user_id=user_id,
+            )
+
+    def set_selected_template(self, template_id: int | None) -> dict[str, Any]:
+        with self._lock:
+            self.selected_template_id = int(template_id) if template_id is not None else None
+            self.config.selected_template_id = self.selected_template_id
+            return self.serialize_state()
 
     def save_player_session(
         self,
@@ -389,6 +426,7 @@ class WebGameSession:
             "state": state,
             "character_profiles": profiles,
             "scene_config": _json_clone(self.scene_config),
+            "selected_template_id": self.selected_template_id,
         }
 
     def load_runtime_snapshot(self, snapshot: dict[str, Any]) -> dict[str, Any]:
@@ -422,6 +460,8 @@ class WebGameSession:
         self.state = _json_clone(state)
         self._reload_dependencies()
         self.story_initialized = bool(session_meta.get("story_initialized", False))
+        self.selected_template_id = snapshot.get("selected_template_id")
+        self.config.selected_template_id = self.selected_template_id
         self.last_handoff_reason = str(session_meta.get("last_handoff_reason") or "已从数据库存档恢复。")
         self._reset_auto_mode_flags_unlocked()
         return self.serialize_state()
@@ -661,6 +701,24 @@ class WebGameSession:
         self._reset_auto_mode_flags_unlocked()
         if initialize_story:
             self._initialize_story()
+            self._inject_template_plot_beats_unlocked()
+
+    def _inject_template_plot_beats_unlocked(self) -> None:
+        if self.selected_template_id is None or self._story_template_service is None:
+            self.state["plot"]["template_plot_beats"] = []
+            return
+        chapter_hint = str(self.state["plot"].get("current_chapter_title", "") or "")
+        try:
+            beats = self._story_template_service.suggest_plot_beats(
+                self.selected_template_id, query=chapter_hint, top_k=5,
+            )
+        except Exception:
+            self.state["plot"]["template_plot_beats"] = []
+            return
+        self.state["plot"]["template_plot_beats"] = [
+            {"label": b.get("label", ""), "summary": b.get("summary", "")}
+            for b in beats
+        ]
 
     def _reload_dependencies(self) -> None:
         self.deps = build_graph_dependencies(
@@ -730,6 +788,9 @@ class WebGameSession:
     def _initialize_story(self) -> None:
         if self.config.mode in {"agent-first", "live"}:
             self.state = prepare_story_setup(self.state, self.deps)
+            # 开局就把首场景编排完(seed NPC 上场 + director/scheduler),
+            # 让玩家第一次搭话当场就有 NPC 逐条回应,而不是首回合冷场。
+            self.state = prepare_chapter_turn(self.state, self.deps)
             self.state = self._controller.prime_opening_turn(self.state)
             self.story_initialized = True
             self.last_handoff_reason = "开场交接完成，等待玩家定义第一步行动。"
@@ -810,6 +871,7 @@ class WebGameSession:
             },
             "parser_status": _resolve_parser_status(self.story_initialized, state),
         }
+        payload["selected_template_id"] = self.selected_template_id
         payload["prompt_templates"] = _build_prompt_templates(payload)
         return payload
 

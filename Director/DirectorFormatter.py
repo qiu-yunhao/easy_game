@@ -66,7 +66,6 @@ def _serialize_stage_character(
     runtime = state["characters"].get(character_id, {})
     profile = character_profiles.get(character_id, {})
     agent_type = clean_text(profile.get("agent_type", "actor"), "actor")
-    l2_profile = profile.get("l2_profile", {})
     l1_profile = profile.get("l1_profile", {})
     layer_assignment = profile.get("layer_assignment", {})
 
@@ -82,10 +81,7 @@ def _serialize_stage_character(
         "emotion": runtime.get("emotion", {}),
         "last_turn": runtime.get("last_turn", -1),
     }
-    if agent_type == "L2":
-        block["l2_profile"] = l2_profile if isinstance(l2_profile, dict) else {}
-        block["scene_support_bias"] = "Let this role support the beat through Help, Block, Buffer, or Inform without overtaking the dramatic center."
-    elif agent_type == "L1":
+    if agent_type == "L1":
         block["l1_profile"] = l1_profile if isinstance(l1_profile, dict) else {}
         block["dramatic_weight"] = "This is a major role. Prefer them when the beat needs conflict, decision pressure, revelation, or relationship turning points."
     return block
@@ -94,12 +90,11 @@ def _serialize_stage_character(
 def _group_actor_ids_by_tier(actor_ids: list[str], character_profiles: dict[str, dict[str, Any]]) -> dict[str, list[str]]:
     grouped = {
         "L1": [],
-        "L2": [],
         "actor": [],
     }
     for actor_id in actor_ids:
         agent_type = clean_text(character_profiles.get(actor_id, {}).get("agent_type", "actor"), "actor")
-        if agent_type not in grouped:
+        if agent_type != "L1":
             agent_type = "actor"
         grouped[agent_type].append(actor_id)
     return grouped
@@ -155,11 +150,10 @@ class DirectorFormatter:
                 "selection_order": [
                     "1. First check whether any L1 role or player-facing conflict needs the beat focus.",
                     "2. If no L1 pressure is active, decide whether the player should stay centered or whether the environment can breathe for a moment.",
-                    "3. Bring in L2 roles only when they can support the beat through Help, Block, Buffer, or Inform.",
-                    "4. L2 roles may shape the local situation, but they should not replace the chapter's main dramatic center unless no L1 conflict is available.",
+                    "3. Bring in NPC-Actor roles only when they can support the beat through Help, Block, Buffer, or Inform.",
+                    "4. NPC-Actor roles may shape the local situation, but they should not replace the chapter's main dramatic center unless no L1 conflict is available.",
                 ],
                 "L1_priority_rule": "Prefer L1 when the scene needs confrontation, revelation, decision pressure, relationship turning points, or a major stance shift.",
-                "L2_support_rule": "Use L2 to support scene flow, provide friction, calm tension, or deliver practical information without stealing the scene's long-arc ownership.",
                 "environment_rule": "After an environment change, NPC appearance is optional; choose it only when it serves the beat.",
             },
             "narrative_transition_contract": {
@@ -204,10 +198,8 @@ class DirectorFormatter:
             ),
             "stage_tiers": {
                 "on_stage_l1": on_stage_tiers["L1"],
-                "on_stage_l2": on_stage_tiers["L2"],
                 "on_stage_other": on_stage_tiers["actor"],
                 "available_l1_candidates": available_candidate_tiers["L1"],
-                "available_l2_candidates": available_candidate_tiers["L2"],
                 "available_other_candidates": available_candidate_tiers["actor"],
             },
             "characters_on_stage": character_blocks,

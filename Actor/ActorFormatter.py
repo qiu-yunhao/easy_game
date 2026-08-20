@@ -44,16 +44,17 @@ def _build_actor_payload(
     actor_id = memory_ctx.actor_id
     actor_profile = memory_ctx.persona
     actor_runtime = state["characters"].get(actor_id or "", {})
+    agent_type = str(actor_profile.get("agent_type", "actor") or "actor")
     actor_memory_profile = normalize_character_memory_config(
         actor_profile.get("memory_profile", {}),
-        agent_type=str(actor_profile.get("agent_type", "actor") or "actor"),
+        agent_type=agent_type,
     )
     actor_memory = ensure_character_memory_state(
         actor_runtime.get("memory", {}),
         actor_profile=actor_profile,
     )
     actor_runtime_prompt = _build_actor_runtime_prompt_state(actor_runtime)
-    return {
+    payload: dict[str, Any] = {
         "plot": {
             "chapter_id": state["plot"]["chapter_id"],
             "scene_id": state["plot"]["scene_id"],
@@ -66,27 +67,22 @@ def _build_actor_payload(
         },
         "actor_profile": actor_profile,
         "agent_contract": {
-            "agent_type": actor_profile.get("agent_type", "actor"),
-            "l2_profile": actor_profile.get("l2_profile", {}),
+            "agent_type": agent_type,
             "l1_profile": actor_profile.get("l1_profile", {}),
             "layer_assignment": actor_profile.get("layer_assignment", {}),
             "memory_profile": actor_memory_profile,
         },
-        "actor_memory": {
-            "pinned_long_term_memory": actor_memory.get("pinned_long_term_memory", []),
-            "consolidated_memory": actor_memory.get("consolidated_memory", [])[-3:],
-            "long_term_memory": actor_memory.get("long_term_memory", [])[-3:],
-        },
         "scene_plan": state["scene_plan"],
         "scene": state["scene"],
         "director_brief": state["director_brief"],
-        "player_memory": actor_memory.get("player_memory", {}),
         "actor_runtime": actor_runtime_prompt,
         "next_act": planned_act,
         "recent_history": list(memory_ctx.short_term),
-        "recent_short_term_memory": actor_memory.get("short_term_memory", [])[-10:],
         "recalled_memories": _format_recalled(list(memory_ctx.retrieved)),
     }
+    if agent_type == "L1":
+        payload["player_memory"] = actor_memory.get("player_memory", {})
+    return payload
 
 
 def _clamp_unit(value: Any) -> float:

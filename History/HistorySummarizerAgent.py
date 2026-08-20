@@ -42,7 +42,10 @@ class HistorySummarizerAgent(BaseAgent):
             instruction=instruction,
             response_format=HISTORY_SCORE_RESPONSE_SCHEMA,
         )
-        return result["items"]
+        items = result.get("items") if isinstance(result, dict) else None
+        if not isinstance(items, list):
+            raise ValueError("history score response missing `items` list")
+        return items
 
     def summarize_chunk(self, payload: dict[str, Any]) -> dict[str, Any]:
         instruction = (
