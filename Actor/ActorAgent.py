@@ -32,10 +32,9 @@ Rules:
     - stay within `judgement_preference` and `behavior_rule`
     - let `speech_style` shape wording
     - support the scene without trying to dominate it
-11. Use `recent_short_term_memory` to stay coherent with the current chapter and scene.
-12. Use `player_memory` when the player is involved in the interaction.
-13. If `actor_profile.agent_type` is `L1`, let `l1_profile`, `actor_memory.pinned_long_term_memory`, `actor_memory.consolidated_memory`, and `actor_memory.long_term_memory` carry the deeper dramatic continuity.
-14. `recalled_memories` are relevant past events you associate with the current situation; weave them naturally into your reaction, but never fabricate events that did not happen.
+11. Use `recent_history` to stay coherent with the current chapter and scene.
+12. If `actor_profile.agent_type` is `L1`, let `l1_profile` and `recalled_memories` carry the deeper dramatic continuity.
+13. `recalled_memories` are relevant past events you associate with the current situation; weave them naturally into your reaction, but never fabricate events that did not happen.
 """
 
 class ActorAgent(BaseAgent):
