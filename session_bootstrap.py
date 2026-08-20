@@ -44,7 +44,6 @@ AGENT_FIRST_COMPONENT_NAMES = (
     "actor_create_agent",
     "director_agent",
     "actor_agent",
-    "l2_actor_agent",
     "l1_actor_agent",
     "narrator_agent",
     "history_summarizer_agent",

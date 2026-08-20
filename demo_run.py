@@ -104,7 +104,7 @@ def build_dependencies(
         component_names=tuple(
             name
             for name in AGENT_FIRST_COMPONENT_NAMES
-            if name not in {"l1_actor_agent", "l2_actor_agent"}
+            if name not in {"l1_actor_agent"}
             and (interactive or name != "semantic_parser_agent")
         ),
     )

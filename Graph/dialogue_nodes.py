@@ -134,13 +134,6 @@ def _resolve_agent_for_actor(
 ) -> ActorAgent | None:
     actor_profile = deps.character_profiles.get(actor_id, {})
     agent_type = _clean_text(actor_profile.get("agent_type", ""), "actor")
-    if agent_type == "L2":
-        return _resolve_component(
-            deps,
-            "l2_actor_agent",
-            "build_l2_actor_agent",
-            required_name="an L2ActorAgent",
-        )
     if agent_type == "L1":
         return _resolve_component(
             deps,

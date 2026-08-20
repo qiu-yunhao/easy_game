@@ -197,7 +197,7 @@ def _build_profiles(cast: list[str]) -> dict[str, dict[str, object]]:
 
 
 class BeatResolutionTests(unittest.TestCase):
-    def test_actor_node_dispatches_to_l2_actor_agent(self) -> None:
+    def test_actor_node_folds_l2_into_default_actor_agent(self) -> None:
         state = _build_state(
             on_stage=["npc_a"],
             focus_character="npc_a",
@@ -227,7 +227,6 @@ class BeatResolutionTests(unittest.TestCase):
             character_profiles=profiles,
             actor_memory_provider=DefaultActorMemoryProvider(character_profiles=profiles),
             actor_agent=FakeTierActor("default"),
-            l2_actor_agent=FakeTierActor("l2"),
             l1_actor_agent=FakeTierActor("l1"),
             component_factory=ComponentFactory(),
         )
@@ -235,7 +234,8 @@ class BeatResolutionTests(unittest.TestCase):
 
         next_state = actor_node(state, deps)
 
-        self.assertEqual(next_state["runtime"]["resolved_act"]["spoken_text"], "l2:npc_a")
+        # Two-tier: former L2 profiles now route to the NPC-Actor (default) agent.
+        self.assertEqual(next_state["runtime"]["resolved_act"]["spoken_text"], "default:npc_a")
 
     def test_actor_node_dispatches_to_l1_actor_agent(self) -> None:
         state = _build_state(
@@ -267,7 +267,6 @@ class BeatResolutionTests(unittest.TestCase):
             character_profiles=profiles,
             actor_memory_provider=DefaultActorMemoryProvider(character_profiles=profiles),
             actor_agent=FakeTierActor("default"),
-            l2_actor_agent=FakeTierActor("l2"),
             l1_actor_agent=FakeTierActor("l1"),
             component_factory=ComponentFactory(),
         )
@@ -299,7 +298,6 @@ class BeatResolutionTests(unittest.TestCase):
             character_profiles=profiles,
             actor_memory_provider=DefaultActorMemoryProvider(character_profiles=profiles),
             actor_agent=FakeTierActor("default"),
-            l2_actor_agent=FakeTierActor("l2"),
             l1_actor_agent=FakeTierActor("l1"),
             component_factory=ComponentFactory(),
         )
