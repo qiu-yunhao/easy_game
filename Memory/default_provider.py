@@ -4,7 +4,7 @@ from typing import Any, Mapping, Optional
 
 from CharacterProfile import CharacterProfile, ensure_character_profile
 from GameState import GameState
-from Memory.context import ActorMemoryContext, LongTermView
+from Memory.context import ActorMemoryContext
 from Memory.scene_filter import PresenceGranularity, filter_history_by_presence
 
 
@@ -54,15 +54,6 @@ class DefaultActorMemoryProvider:
             granularity=self._granularity,
         )
 
-        # 长期:直接复用角色已压缩的记忆字段(不重新压缩)。
-        # 拷成新 list 只是隔离外层增删,元素仍是原引用(只读投影)。
-        memory = state["characters"].get(actor_id, {}).get("memory", {})
-        long_term = LongTermView(
-            consolidated=list(memory.get("consolidated_memory", [])),
-            long_term=list(memory.get("long_term_memory", [])),
-            pinned=list(memory.get("pinned_long_term_memory", [])),
-        )
-
         # 检索词 = 当前 intent + 最近对话;失败/未启用降级为空。
         query = self._compose_recall_query(actor_id, state, short_term)
 
@@ -70,7 +61,6 @@ class DefaultActorMemoryProvider:
             actor_id=actor_id,
             persona=persona,
             short_term=short_term,
-            long_term=long_term,
             retrieved=self.retrieve(
                 actor_id, query, user_id=self._user_id, player_id=self._player_id
             ),
