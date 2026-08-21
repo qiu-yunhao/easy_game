@@ -323,7 +323,6 @@ def _resolve_story_agent_type(
 
         **未被背景提及**：
             - explicit 非空 → 采纳 explicit。
-            - `long_term_plot_significance` / 多章 (`>=2`) / core → L1。
             - `plot_significance == "replaceable"` → actor。
             - 其他默认 L1。
 
@@ -337,17 +336,13 @@ def _resolve_story_agent_type(
         explicit_agent_type = ""
 
     mentioned_in_player_backstory = bool(layer_assignment_seed.get("mentioned_in_player_backstory", False))
-    long_term_plot_significance = bool(layer_assignment_seed.get("long_term_plot_significance", False))
     plot_significance = clean_text(layer_assignment_seed.get("plot_significance", ""), "supporting")
-    multi_chapter_presence = planned_chapter_count >= 2 or len(planned_chapter_ids) >= 2
 
     if mentioned_in_player_backstory:
         return "L1"
 
     if explicit_agent_type:
         return explicit_agent_type
-    if long_term_plot_significance or multi_chapter_presence or plot_significance == "core":
-        return "L1"
     if plot_significance == "replaceable":
         return "actor"
     return "L1"

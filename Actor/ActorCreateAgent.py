@@ -4,7 +4,7 @@
 `ActorCreateAgent` 类本体。配套模块分工如下：
 
 - `Actor.ActorCreateSchema`：JSON Schema、容量常量 (MAX_L1_AGENTS/
-  MAX_STORY_CHARACTERS) 及 BACKSTORY_RELATION_HINTS.
+  MAX_STORY_CHARACTERS) 及 BACKSTORY_RELATION_HINTS。
 - `Actor.ActorCreatePrompt`：系统提示词 ACTOR_CREATE_SYSTEM_PROMPT。
 - `Actor.ActorCreateHeuristics`：`_` 前缀的启发式辅助函数（分配层级、
   分配章节、构造 character_id 等）。
