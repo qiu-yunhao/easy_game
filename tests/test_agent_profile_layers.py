@@ -17,9 +17,8 @@ openai_stub.OpenAI = _OpenAI
 sys.modules.setdefault("openai", openai_stub)
 
 from Actor.ActorCreateAgent import ActorCreateAgent
-from CharacterProfile import ensure_character_profile, promote_character_profile_to_l1
+from CharacterProfile import ensure_character_profile
 from GameState import create_character_runtime_state, create_initial_game_state, create_player_state
-from SupportingSceneIntentPolicy import SupportingSceneIntentPolicy
 
 
 def _build_game_state():
@@ -125,8 +124,6 @@ class AgentProfileLayerTests(unittest.TestCase):
                 "summary": {
                     "total_L1": 1,
                     "max_L1": 6,
-                    "total_L2": 2,
-                    "max_L2": 15,
                     "total_ActorAgent": 3,
                 },
                 "characters": [],
@@ -139,7 +136,7 @@ class AgentProfileLayerTests(unittest.TestCase):
         self.assertEqual([tool["name"] for tool in payload["available_tools"]], ["query_character_roster"])
         self.assertIn("character_roster_snapshot", payload)
 
-    def test_actor_create_profiles_default_to_l2_and_backfill_compact_fields(self) -> None:
+    def test_actor_create_profiles_default_to_l1_and_backfill_compact_fields(self) -> None:
         profile = ensure_character_profile(
             {
                 "character_id": "gate_captain",
@@ -155,10 +152,10 @@ class AgentProfileLayerTests(unittest.TestCase):
             character_id="gate_captain",
         )
 
-        self.assertEqual(profile["agent_type"], "L2")
-        self.assertEqual(profile["l2_profile"]["judgement_preference"], ["谨慎"])
-        self.assertEqual(profile["l2_profile"]["speech_style"], ["说话沉稳直接"])
-        self.assertEqual(profile["layer_assignment"]["plot_significance"], "supporting")
+        self.assertEqual(profile["agent_type"], "L1")
+        self.assertIn("l1_profile", profile)
+        self.assertTrue(profile["l1_profile"])
+        self.assertEqual(profile["layer_assignment"]["plot_significance"], "core")
 
     def test_l1_interface_is_preserved_with_fallback_conflict_fields(self) -> None:
         profile = ensure_character_profile(
@@ -182,7 +179,7 @@ class AgentProfileLayerTests(unittest.TestCase):
         self.assertTrue(profile["l1_profile"]["outer_goal"])
         self.assertEqual(profile["layer_assignment"]["plot_significance"], "core")
 
-    def test_actor_create_keeps_backstory_mentioned_functional_roles_at_least_l2(self) -> None:
+    def test_actor_create_keeps_backstory_mentioned_functional_roles_at_least_l1(self) -> None:
         agent = ActorCreateAgent(client=object())
         normalized = agent.normalize_supporting_cast(
             {
@@ -195,7 +192,7 @@ class AgentProfileLayerTests(unittest.TestCase):
                         "base_style": "轻声却警惕",
                         "background": "他熟悉旧商路与外山消息，偶尔替玩家留意线索。",
                         "secrets": [],
-                        "agent_type": "L2",
+                        "agent_type": "L1",
                         "layer_assignment": {
                             "mentioned_in_player_backstory": True,
                             "plot_significance": "supporting",
@@ -203,13 +200,6 @@ class AgentProfileLayerTests(unittest.TestCase):
                             "long_term_plot_significance": False,
                             "can_promote_to_l1": True,
                             "assignment_reason": "player_backstory_interactive_floor",
-                        },
-                        "l2_profile": {
-                            "core_drive": "继续维持商路消息网",
-                            "judgement_preference": ["先判断风险"],
-                            "behavior_rule": ["优先自保", "愿意给熟人留后手"],
-                            "speech_style": ["低声提醒"],
-                            "personality_tags": ["谨慎", "世故"],
                         },
                         "spiritual_root": "杂灵根",
                         "realm": "练气三层",
@@ -228,10 +218,10 @@ class AgentProfileLayerTests(unittest.TestCase):
         )
 
         profile = normalized["old_contact"]
-        self.assertEqual(profile["agent_type"], "L2")
+        self.assertEqual(profile["agent_type"], "L1")
         self.assertTrue(profile["layer_assignment"]["mentioned_in_player_backstory"])
-        self.assertEqual(profile["layer_assignment"]["plot_significance"], "supporting")
-        self.assertIn("l2_profile", profile)
+        self.assertEqual(profile["layer_assignment"]["plot_significance"], "core")
+        self.assertIn("l1_profile", profile)
 
     def test_actor_create_promotes_backstory_long_arc_roles_to_l1(self) -> None:
         agent = ActorCreateAgent(client=object())
@@ -246,7 +236,7 @@ class AgentProfileLayerTests(unittest.TestCase):
                         "base_style": "锋利寡言",
                         "background": "他与玩家血脉旧案直接相关，未来会持续阻拦主线。",
                         "secrets": [],
-                        "agent_type": "L2",
+                        "agent_type": "L1",
                         "layer_assignment": {
                             "mentioned_in_player_backstory": True,
                             "plot_significance": "core",
@@ -283,82 +273,6 @@ class AgentProfileLayerTests(unittest.TestCase):
         self.assertTrue(profile["layer_assignment"]["long_term_plot_significance"])
         self.assertEqual(profile["layer_assignment"]["plot_significance"], "core")
         self.assertIn("l1_profile", profile)
-
-    def test_l2_profile_can_be_promoted_to_l1_with_preserved_layer_metadata(self) -> None:
-        promoted = promote_character_profile_to_l1(
-            ensure_character_profile(
-                {
-                    "character_id": "junior_brother",
-                    "name": "陆青",
-                    "agent_type": "L2",
-                    "persona": ["热忱", "局促"],
-                    "base_style": "话多却真诚",
-                    "story_role": "玩家同门师弟",
-                    "base_relationship": {},
-                    "secrets": [],
-                    "spiritual_root": "木灵根",
-                    "realm": "练气四层",
-                    "main_technique": "青木引气诀",
-                    "l2_profile": {
-                        "core_drive": "在宗门里立稳脚跟",
-                        "judgement_preference": ["先服从师门"],
-                        "behavior_rule": ["优先帮熟人", "不敢正面顶撞长辈"],
-                        "speech_style": ["急促坦白"],
-                        "personality_tags": ["热忱", "现实"],
-                    },
-                    "layer_assignment": {
-                        "mentioned_in_player_backstory": True,
-                        "plot_significance": "supporting",
-                        "relationship_depth": "functional",
-                        "long_term_plot_significance": False,
-                        "can_promote_to_l1": True,
-                        "assignment_reason": "player_backstory_interactive_floor",
-                    },
-                },
-                character_id="junior_brother",
-            ),
-            character_id="junior_brother",
-            assignment_reason="promoted_by_story_manager",
-        )
-
-        self.assertEqual(promoted["agent_type"], "L1")
-        self.assertTrue(promoted["layer_assignment"]["long_term_plot_significance"])
-        self.assertFalse(promoted["layer_assignment"]["can_promote_to_l1"])
-        self.assertEqual(promoted["layer_assignment"]["assignment_reason"], "promoted_by_story_manager")
-        self.assertIn("l1_profile", promoted)
-
-    def test_supporting_scene_intent_policy_selects_block_for_guard_style_l2(self) -> None:
-        policy = SupportingSceneIntentPolicy()
-        decision = policy.decide(
-            actor_profile=ensure_character_profile(
-                {
-                    "character_id": "guard_captain",
-                    "name": "城门卫队长",
-                    "agent_type": "L2",
-                    "persona": ["谨慎", "现实"],
-                    "base_style": "说话沉稳直接",
-                    "spiritual_root": "杂灵根",
-                    "realm": "练气六层",
-                    "main_technique": "护城桩功",
-                    "l2_profile": {
-                        "core_drive": "守住城门秩序",
-                        "judgement_preference": ["先服从上级"],
-                        "behavior_rule": ["优先自保", "再考虑配合熟人"],
-                        "speech_style": ["表面严厉"],
-                        "personality_tags": ["谨慎", "现实"],
-                    },
-                },
-                character_id="guard_captain",
-            ),
-            scene_need_detected=True,
-            player_action_text="玩家想直接闯入城门禁区。",
-            scene_goal="让守卫对玩家形成一道现实阻力。",
-            beat_goal="守卫需要出面阻拦玩家。",
-        )
-
-        self.assertTrue(decision["should_act"])
-        self.assertEqual(decision["selected_function"], "Block")
-        self.assertTrue(decision["scene_need_detected"])
 
     def test_replaceable_functional_role_can_fall_back_to_base_actor_layer(self) -> None:
         agent = ActorCreateAgent(client=object())
@@ -403,10 +317,10 @@ class AgentProfileLayerTests(unittest.TestCase):
         self.assertEqual(profile["storage_mode"], "shared_template")
         self.assertEqual(profile["occupation"], "blacksmith")
 
-    def test_story_manager_limits_non_backstory_l1_and_l2_counts(self) -> None:
+    def test_story_manager_limits_non_backstory_l1_counts(self) -> None:
         agent = ActorCreateAgent(client=object())
         character_profiles = _build_player_profiles("A quiet cultivator entering the sect.")
-        for index in range(6):
+        for index in range(21):
             character_profiles[f"l1_{index}"] = ensure_character_profile(
                 {
                     "character_id": f"l1_{index}",
@@ -422,23 +336,6 @@ class AgentProfileLayerTests(unittest.TestCase):
                     "main_technique": "",
                 },
                 character_id=f"l1_{index}",
-            )
-        for index in range(15):
-            character_profiles[f"l2_{index}"] = ensure_character_profile(
-                {
-                    "character_id": f"l2_{index}",
-                    "name": f"L2 {index}",
-                    "agent_type": "L2",
-                    "story_role": "existing support role",
-                    "persona": [],
-                    "base_style": "",
-                    "base_relationship": {},
-                    "secrets": [],
-                    "spiritual_root": "",
-                    "realm": "",
-                    "main_technique": "",
-                },
-                character_id=f"l2_{index}",
             )
 
         normalized = agent.normalize_supporting_cast(
