@@ -140,6 +140,8 @@ def _resolve_agent_type(source: Mapping[str, Any]) -> AgentType:
     explicit = clean_text(source.get("agent_type", ""))
     if explicit in {"actor", "L1"}:
         return explicit  # type: ignore[return-value]
+    if isinstance(source.get("l1_profile"), Mapping):
+        return "L1"
     if clean_text(source.get("profile_source", "")) == "actor_create_agent":
         return "L1"
     return "actor"
