@@ -4,7 +4,7 @@
 `ActorCreateAgent` 类本体。配套模块分工如下：
 
 - `Actor.ActorCreateSchema`：JSON Schema、容量常量 (MAX_L1_AGENTS/
-  MAX_L2_AGENTS/MAX_STORY_CHARACTERS) 及 BACKSTORY_RELATION_HINTS。
+  MAX_STORY_CHARACTERS) 及 BACKSTORY_RELATION_HINTS.
 - `Actor.ActorCreatePrompt`：系统提示词 ACTOR_CREATE_SYSTEM_PROMPT。
 - `Actor.ActorCreateHeuristics`：`_` 前缀的启发式辅助函数（分配层级、
   分配章节、构造 character_id 等）。
@@ -24,7 +24,6 @@ from CharacterProfile import (
     DEFAULT_SPIRITUAL_ROOT,
     ensure_character_profile,
     normalize_l1_agent_profile,
-    normalize_l2_agent_profile,
     normalize_layer_assignment,
     normalize_relationship_mapping,
 )
@@ -44,7 +43,6 @@ from Actor.ActorCreateSchema import (
     ACTOR_CREATE_RESPONSE_SCHEMA,
     CONTEXTUAL_ACTOR_RESPONSE_SCHEMA,
     MAX_L1_AGENTS,
-    MAX_L2_AGENTS,
     MAX_STORY_CHARACTERS,
 )
 from Actor.ActorCreateHeuristics import (
@@ -129,7 +127,7 @@ class ActorCreateAgent(BaseAgent):
         """
         player_id = resolve_player_character_id(game_state, character_profiles)
         player_profile = character_profiles.get(player_id, {})
-        existing_l1_count, existing_l2_count, existing_actor_count = _resolve_effective_roster_counts(
+        existing_l1_count, existing_actor_count = _resolve_effective_roster_counts(
             character_profiles,
             character_roster_snapshot,
         )
@@ -150,14 +148,14 @@ class ActorCreateAgent(BaseAgent):
         payload = {
             "creative_goal": (
                 "Supplement the cast so the story outline and current/future chapters have concrete interactive agents "
-                "with an intentional L1/L2 layer assignment."
+                "with an intentional L1 layer assignment."
             ),
             "constraints": {
                 "max_player_bound_characters": max_total_characters,
-                "existing_player_bound_character_count": existing_l1_count + existing_l2_count,
+                "existing_player_bound_character_count": existing_l1_count,
                 "max_new_player_bound_characters": max(
                     0,
-                    max_total_characters - (existing_l1_count + existing_l2_count),
+                    max_total_characters - existing_l1_count,
                 ),
                 "base_actor_templates_are_unbounded": True,
                 "has_story_outline": bool(outline),
@@ -168,21 +166,16 @@ class ActorCreateAgent(BaseAgent):
                     "Create or refine only the minimum supporting cast needed for the outlined chapters."
                 ),
                 "player_backstory_floor_rule": (
-                    "Any role clearly mentioned in the player background must be assigned as L1 or L2, never treated as a discardable extra."
+                    "Any role clearly mentioned in the player background must be assigned as L1, never treated as a discardable extra."
                 ),
                 "L1_rule": (
                     "Use L1 for long-term mainline roles, deep bonds, irreplaceable rivals, blood/fate ties, or characters expected to carry major turns."
-                ),
-                "L2_rule": (
-                    "Use L2 for important but softer support roles that mainly serve a scene, chapter, route, or short-term functional need."
                 ),
                 "actor_rule": (
                     "Use actor for functional or atmospheric roles that can be reused as a shared template and do not need long-horizon autonomy."
                 ),
                 "max_l1_agents": MAX_L1_AGENTS,
                 "existing_l1_agents": existing_l1_count,
-                "max_l2_agents": MAX_L2_AGENTS,
-                "existing_l2_agents": existing_l2_count,
                 "existing_actor_templates": existing_actor_count,
             },
             "player_character_id": player_id,
@@ -237,7 +230,7 @@ class ActorCreateAgent(BaseAgent):
             "Do not echo the full cast. Reuse existing supporting ids when refining already generated characters. "
             "Use lowercase ASCII snake_case ids whenever you create a new id. "
             "Every character must include `agent_type` and `layer_assignment`. "
-            "If `agent_type` is `L2`, include a complete `l2_profile`; if `agent_type` is `L1`, include a complete `l1_profile`. "
+            "If `agent_type` is `L1`, include a complete `l1_profile`. "
             "For reusable base actors, set `agent_type` to `actor` and include a practical `occupation`.",
             payload,
         )
@@ -263,7 +256,7 @@ class ActorCreateAgent(BaseAgent):
         即时上台，本方法拼装一份只允许产出**恰好一个**角色的 Prompt，
         通过 ``immediate_scene_need``（destination/objective/reward_item/
         player_intent）把当下的场景压力显式告诉 LLM，同时仍然允许它选择
-        actor / L2 / L1 三种档位，只不过默认应偏向可复用的 actor 模板。
+        actor / L1 两种档位，只不过默认应偏向可复用的 actor 模板。
         """
         player_id = resolve_player_character_id(game_state, character_profiles)
         player_profile = character_profiles.get(player_id, {})
@@ -335,8 +328,8 @@ class ActorCreateAgent(BaseAgent):
             "Return exactly one contextual ActorAgent under the `actor` field as strict JSON. "
             "This actor should exist to make the next scene playable and interactive. "
             "Do not generate multiple characters, and do not write scene prose or dialogue. "
-            "Choose between `actor`, `L2`, and `L1` using the same story-weight rules. "
-            "Always include `layer_assignment`, plus the matching `l2_profile` or `l1_profile` when applicable.",
+            "Choose between `actor` and `L1` using the same story-weight rules. "
+            "Always include `layer_assignment`, plus the matching `l1_profile` when applicable.",
             payload,
         )
 
@@ -361,12 +354,12 @@ class ActorCreateAgent(BaseAgent):
         3. ``_build_layer_assignment_seed`` —— 汇总 story_role / persona /
            planned_chapter 等信号，产出层级判定种子。
         4. ``_resolve_story_agent_type`` —— 根据种子 + 章节规划得出
-           ``actor / L2 / L1`` 三档中的一档。
+           ``actor / L1`` 两档中的一档。
         5. ``_respect_agent_layer_limits`` + ``_respect_player_bound_capacity``
-           —— 依次夹紧 L1/L2 上限、以及 player-bound 总容量。
+           —— 依次夹紧 L1 上限、以及 player-bound 总容量。
         6. ``_assign_chapter_ids`` —— outline 存在但角色未提供
            ``planned_chapter_ids`` 时，从当前章节顺推补齐。
-        7. 按最终 agent_type 填充 ``l1_profile`` 或 ``l2_profile``，
+        7. 按最终 agent_type 填充 ``l1_profile``，
            并写入 ``profile_source="actor_create_agent"`` 作为持久化标记。
 
         **注意：``"actor_create_agent"`` 字符串是持久化数据中的
@@ -383,12 +376,11 @@ class ActorCreateAgent(BaseAgent):
         ]
         current_chapter_id = clean_text(game_state["plot"].get("chapter_id"))
         start_index = outline_ids.index(current_chapter_id) if current_chapter_id in outline_ids else 0
-        existing_l1_count, existing_l2_count, _ = _resolve_effective_roster_counts(
+        existing_l1_count, _ = _resolve_effective_roster_counts(
             character_profiles,
             character_roster_snapshot,
         )
         new_l1_count = 0
-        new_l2_count = 0
         normalized: dict[str, CharacterProfile] = {}
         used_ids: set[str] = set()
 
@@ -480,18 +472,14 @@ class ActorCreateAgent(BaseAgent):
                 resolved_agent_type=resolved_agent_type,
                 layer_assignment=layer_assignment,
                 existing_l1_count=existing_l1_count,
-                existing_l2_count=existing_l2_count,
                 new_l1_count=new_l1_count,
-                new_l2_count=new_l2_count,
             )
             resolved_agent_type = _respect_player_bound_capacity(
                 resolved_agent_type=resolved_agent_type,
                 layer_assignment=layer_assignment,
                 max_total_characters=max_total_characters,
                 existing_l1_count=existing_l1_count,
-                existing_l2_count=existing_l2_count,
                 new_l1_count=new_l1_count,
-                new_l2_count=new_l2_count,
             )
             layer_assignment = normalize_layer_assignment(
                 layer_assignment,
@@ -504,7 +492,7 @@ class ActorCreateAgent(BaseAgent):
                     "character_id": character_id,
                     "name": name,
                     "agent_type": resolved_agent_type,
-                    "story_layer": resolved_agent_type if resolved_agent_type in {"L1", "L2"} else "actor",
+                    "story_layer": resolved_agent_type if resolved_agent_type == "L1" else "actor",
                     "occupation": clean_text(raw_character.get("occupation", ""))
                     or clean_text(existing_profile.get("occupation", "")),
                     "persona": persona,
@@ -542,18 +530,7 @@ class ActorCreateAgent(BaseAgent):
                             )
                         }
                         if resolved_agent_type == "L1"
-                        else (
-                            {
-                                "l2_profile": normalize_l2_agent_profile(
-                                    raw_character.get("l2_profile", existing_profile.get("l2_profile", {})),
-                                    fallback_story_role=story_role,
-                                    fallback_persona=persona,
-                                    fallback_style=base_style,
-                                )
-                            }
-                            if resolved_agent_type == "L2"
-                            else {}
-                        )
+                        else {}
                     ),
                 },
                 character_id=character_id,
@@ -569,8 +546,6 @@ class ActorCreateAgent(BaseAgent):
             normalized[character_id] = normalized_profile
             if resolved_agent_type == "L1":
                 new_l1_count += 1
-            elif resolved_agent_type == "L2":
-                new_l2_count += 1
             used_ids.add(character_id)
 
         return normalized
@@ -669,4 +644,4 @@ class ActorCreateAgent(BaseAgent):
         )
 
 
-__all__ = ["ActorCreateAgent", "MAX_L1_AGENTS", "MAX_L2_AGENTS", "MAX_STORY_CHARACTERS"]
+__all__ = ["ActorCreateAgent", "MAX_L1_AGENTS", "MAX_STORY_CHARACTERS"]
