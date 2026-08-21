@@ -100,10 +100,10 @@ def _collect_story_character_ids(snapshot: dict[str, Any]) -> list[str]:
 
 def _resolve_story_layer(profile: dict[str, Any]) -> str:
     story_layer = clean_text(profile.get("story_layer", ""))
-    if story_layer in {"player", "actor", "L2", "L1"}:
+    if story_layer in {"player", "actor", "L1"}:
         return story_layer
     agent_type = clean_text(profile.get("agent_type", "actor"), "actor")
-    if agent_type in {"L2", "L1"}:
+    if agent_type == "L1":
         return agent_type
     return "actor"
 
@@ -154,7 +154,7 @@ def build_story_character_records(snapshot: dict[str, Any]) -> list[dict[str, An
 
     for actor_id in _collect_story_character_ids(snapshot):
         profile = character_profiles.get(actor_id, {})
-        if _resolve_story_layer(profile) not in {"L1", "L2"}:
+        if _resolve_story_layer(profile) != "L1":
             continue
         runtime_state = runtime_characters.get(actor_id, {})
         history_turns = [
