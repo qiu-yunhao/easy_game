@@ -8,7 +8,6 @@ from GameState import GameState
 @dataclass(frozen=True)
 class RefreshDecision:
     should_compress: bool
-    compress_all: bool
 
 
 def _uncompressed_count(state: GameState) -> int:
@@ -21,12 +20,12 @@ def decide_refresh(state: GameState, *, trigger_size: int) -> RefreshDecision:
     has_blocks = bool(state["memory"]["scene_memory"]["compressed_blocks"])
 
     if turn == 0 and not has_blocks:
-        return RefreshDecision(should_compress=False, compress_all=False)
+        return RefreshDecision(should_compress=False)
     if state["runtime"].get("scene_finished", False):
-        return RefreshDecision(should_compress=True, compress_all=True)
+        return RefreshDecision(should_compress=True)
     if _uncompressed_count(state) >= trigger_size:
-        return RefreshDecision(should_compress=True, compress_all=False)
-    return RefreshDecision(should_compress=False, compress_all=False)
+        return RefreshDecision(should_compress=True)
+    return RefreshDecision(should_compress=False)
 
 
 def run_async_refresh(state, *, manager, store, compactor):
