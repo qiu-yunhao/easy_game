@@ -134,10 +134,10 @@ class StoryAuthoringSubgraphTests(unittest.TestCase):
         )
         self.assertIn("sect_elder_qingyuan", deps.character_profiles)
         self.assertIn("sect_elder_qingyuan", next_state["characters"])
-        self.assertEqual(deps.character_profiles["sect_elder_qingyuan"]["agent_type"], "L2")
-        self.assertIn("l2_profile", deps.character_profiles["sect_elder_qingyuan"])
+        self.assertEqual(deps.character_profiles["sect_elder_qingyuan"]["agent_type"], "L1")
+        self.assertIn("l1_profile", deps.character_profiles["sect_elder_qingyuan"])
         self.assertTrue(
-            deps.character_profiles["sect_elder_qingyuan"]["l2_profile"]["core_drive"]
+            deps.character_profiles["sect_elder_qingyuan"]["l1_profile"]
         )
         self.assertEqual(next_state["plot"]["story_outline_source"], "playwright_agent_cast_revised")
         self.assertEqual(next_state["plot"]["story_outline"][0]["title"], "与青源长老结缘")
