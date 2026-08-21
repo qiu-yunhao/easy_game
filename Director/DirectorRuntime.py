@@ -259,7 +259,7 @@ def _resolve_actor_tier(
         return "actor"
     profile = (character_profiles or {}).get(str(actor_id), {})
     agent_type = str(profile.get("agent_type", "actor")).strip()
-    if agent_type in {"L1", "L2", "actor"}:
+    if agent_type in {"L1", "actor"}:
         return agent_type
     return "actor"
 
@@ -288,7 +288,6 @@ def _prioritize_active_actors(
     grouped: dict[str, list[str]] = {
         "actor": [],
         "L1": [],
-        "L2": [],
     }
     for actor_id in remaining_actor_ids:
         grouped[_resolve_actor_tier(actor_id, character_profiles)].append(actor_id)
@@ -296,12 +295,10 @@ def _prioritize_active_actors(
     focus_tier = _resolve_actor_tier(focus_character, character_profiles)
     l1_pressure_active = bool(focus_tier == "L1" or (grouped["L1"] and tension_target >= 0.55))
 
-    if focus_tier == "L2":
-        tier_order = ("actor", "L1", "L2")
-    elif l1_pressure_active:
-        tier_order = ("L1", "actor", "L2")
+    if l1_pressure_active:
+        tier_order = ("L1", "actor")
     else:
-        tier_order = ("actor", "L1", "L2")
+        tier_order = ("actor", "L1")
 
     prioritized = list(focus_block)
     for tier in tier_order:

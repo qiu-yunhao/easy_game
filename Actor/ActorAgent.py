@@ -27,14 +27,9 @@ Rules:
 7. Keep `nonverbal_action` concrete and scene-bound. Avoid generic AI-sounding filler.
 8. `should_end_scene` means this specific scene can close after the turn.
 9. `should_end_chapter` means the broader chapter arc is ready to roll into the next chapter.
-10. If `actor_profile.agent_type` is `L2`, prioritize the compact support-role logic in `l2_profile`:
-    - follow the single `core_drive`
-    - stay within `judgement_preference` and `behavior_rule`
-    - let `speech_style` shape wording
-    - support the scene without trying to dominate it
-11. Use `recent_history` to stay coherent with the current chapter and scene.
-12. If `actor_profile.agent_type` is `L1`, let `l1_profile` and `recalled_memories` carry the deeper dramatic continuity.
-13. `recalled_memories` are relevant past events you associate with the current situation; weave them naturally into your reaction, but never fabricate events that did not happen.
+10. Use `recent_history` to stay coherent with the current chapter and scene.
+11. If `actor_profile.agent_type` is `L1`, let `l1_profile` and `recalled_memories` carry the deeper dramatic continuity.
+12. `recalled_memories` are relevant past events you associate with the current situation; weave them naturally into your reaction, but never fabricate events that did not happen.
 """
 
 class ActorAgent(BaseAgent):
