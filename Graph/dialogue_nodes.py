@@ -25,20 +25,19 @@ from StoryStateUtils import clean_text as _clean_text
 from Cultivation import cultivation_progress_node
 from Director import apply_director_brief
 from GameState import GameState
+from History.MemoryRefreshPolicy import run_async_refresh
 from SceneEnd import apply_scene_end_evaluation
 from Scheduler import apply_scheduler_decision
 from StylisticPolish import deterministic_nonverbal_cleanup
 
 
 def refresh_history_node(state: GameState, deps: GraphDependencies) -> GameState:
-    if deps.history_manager is None:
-        return state
-    if not deps.history_manager.should_refresh(state):
-        return state
-    return {
-        **state,
-        "memory": deps.history_manager.build_memory(state),
-    }
+    return run_async_refresh(
+        state,
+        manager=deps.history_manager,
+        store=deps.memory_store,
+        compactor=deps.memory_compactor,
+    )
 
 
 def director_node(state: GameState, deps: GraphDependencies) -> GameState:

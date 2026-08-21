@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING, Any, Callable
 
 from Actor import ActorAgent
 from Actor.ActorCreateAgent import ActorCreateAgent
@@ -45,6 +45,8 @@ class GraphDependencies:
     stylistic_polish_agent: StylisticPolishAgent | None = None
     history_summarizer_agent: "HistorySummarizerAgent | None" = None
     history_manager: HistoryManager | None = None
+    memory_store: "Any | None" = None
+    memory_compactor: "Any | None" = None
     scheduler_policy: SchedulerPolicy | None = None
     scene_end_policy: SceneEndPolicy | None = None
     player_interface: PlayerInterface | None = None
