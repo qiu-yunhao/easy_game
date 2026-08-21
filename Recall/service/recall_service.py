@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any, Protocol, Sequence
 
 from datatypes import ScoredDoc, VectorDoc
+from Recall.indexing.block_indexer import build_block_docs
 from Recall.indexing.scene_indexer import build_scene_docs
 
 """回忆子系统服务层：编排「索引」与「查询」两条主链路。
@@ -89,6 +90,53 @@ class RecallService:
         vectors = self._embedding.encode([doc.text for doc in docs])
         rows = list(zip(docs, vectors))
         self._vector_store.upsert(rows)
+
+    def index_memory_blocks(
+        self,
+        blocks: Sequence[dict[str, Any]],
+        *,
+        user_id: int,
+        player_id: int,
+    ) -> None:
+        """把压缩块批量索引进向量库(doc_type=memory_block,与场景级隔离)。"""
+        docs = build_block_docs(list(blocks), user_id=user_id, player_id=player_id)
+        if not docs:
+            return
+        vectors = self._embedding.encode([doc.text for doc in docs])
+        self._vector_store.upsert(list(zip(docs, vectors)))
+
+    def recall_memory_blocks(
+        self,
+        query: str,
+        *,
+        user_id: int,
+        player_id: int,
+        actor_id: str,
+        window_start: int,
+        top_k: int = 5,
+    ) -> list[ScoredDoc]:
+        """长期召回:只返回滑出可见窗口(turn_end < window_start)且该角色当时在台
+        (on_stage_union 含 actor_id)的压缩块。归属 + turn 双过滤在服务层完成,
+        因为 PgVectorStore 只支持单值等值 filter。检索失败/无命中返回空。
+        """
+        tenant_filters = {"user_id": user_id, "player_id": player_id}
+        hits = self._hybrid.search(
+            query,
+            top_k=max(top_k * 4, top_k),
+            filters={**tenant_filters, "doc_type": "memory_block"},
+        )
+        results: list[ScoredDoc] = []
+        for scored in hits:
+            meta = scored.doc.metadata or {}
+            turn_end = int(meta.get("turn_end", 0) or 0)
+            if turn_end >= window_start:
+                continue
+            on_stage_union = meta.get("on_stage_union", []) or []
+            if actor_id not in on_stage_union:
+                continue
+            results.append(scored)
+        results.sort(key=lambda s: s.score, reverse=True)
+        return results[:top_k]
 
     def query_recall(
         self,
