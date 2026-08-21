@@ -38,6 +38,7 @@ class CompressedHistoryBlock(TypedDict):
     actors: list[str]
     avg_score: float
     max_score: float
+    on_stage_union: NotRequired[list[str]]   # 块级在场并集(summary 块无 raw_items 时的归属信号)
 
 
 class SceneMemory(TypedDict):

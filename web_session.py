@@ -267,9 +267,14 @@ class WebGameSession:
 
     def _sync_provider_tenant_unlocked(self) -> None:
         # 存档切换时把当前租户推给记忆工厂,使角色对话检索命中本局回忆。
-        provider = getattr(getattr(self, "deps", None), "actor_memory_provider", None)
+        deps = getattr(self, "deps", None)
+        provider = getattr(deps, "actor_memory_provider", None)
         if provider is not None and hasattr(provider, "set_tenant"):
             provider.set_tenant(user_id=self.active_user_id, player_id=self.active_player_id)
+        # 同一租户也推给后台压缩器(写侧),使新压缩块按当前租户入向量库。
+        compactor = getattr(deps, "memory_compactor", None)
+        if compactor is not None and hasattr(compactor, "set_tenant"):
+            compactor.set_tenant(user_id=self.active_user_id, player_id=self.active_player_id)
 
     def _current_save_context_unlocked(self) -> dict[str, int | None]:
         return {"user_id": self.active_user_id, "player_id": self.active_player_id}
@@ -284,9 +289,15 @@ class WebGameSession:
         with self._lock:
             self._recall_service = service
             # 同步给记忆工厂,使角色说话时能语义检索本局回忆;缺 provider 时静默跳过。
-            provider = getattr(getattr(self, "deps", None), "actor_memory_provider", None)
+            deps = getattr(self, "deps", None)
+            provider = getattr(deps, "actor_memory_provider", None)
             if provider is not None and hasattr(provider, "recall_service"):
                 provider.recall_service = service
+            # 写侧:后台压缩器也拿到 service + 当前租户,压缩成功后把新块 upsert 进向量库。
+            compactor = getattr(deps, "memory_compactor", None)
+            if compactor is not None and hasattr(compactor, "set_recall_service"):
+                compactor.set_recall_service(service)
+                compactor.set_tenant(user_id=self.active_user_id, player_id=self.active_player_id)
 
     def _maybe_index_finished_scene_unlocked(self) -> None:
         """幕刚结束时即时提取当前幕并交后台异步索引；缺依赖/上下文/幕数据则静默跳过。"""

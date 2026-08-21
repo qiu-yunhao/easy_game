@@ -25,6 +25,7 @@ class DefaultActorMemoryProvider:
         recall_service: Any = None,
         user_id: Optional[int] = None,
         player_id: Optional[int] = None,
+        summary_horizon_turns: int = 45,
     ) -> None:
         # 注入角色人设表(只读引用)与在场过滤参数。
         self._character_profiles = character_profiles
@@ -34,6 +35,12 @@ class DefaultActorMemoryProvider:
         self.recall_service = recall_service
         self._user_id = user_id
         self._player_id = player_id
+        # 长期召回的回溯窗口:window_start = turn_index - horizon + 1。
+        self._summary_horizon_turns = summary_horizon_turns
+
+    def _is_l1(self, actor_id: str) -> bool:
+        profile = self._character_profiles.get(actor_id) or {}
+        return str(profile.get("agent_type", "actor") or "actor") == "L1"
 
     def set_tenant(self, *, user_id: Optional[int], player_id: Optional[int]) -> None:
         # 会话切换存档时更新当前租户(provider 长生命周期,租户随激活玩家变)。
@@ -62,7 +69,7 @@ class DefaultActorMemoryProvider:
             persona=persona,
             short_term=short_term,
             retrieved=self.retrieve(
-                actor_id, query, user_id=self._user_id, player_id=self._player_id
+                actor_id, query, state, user_id=self._user_id, player_id=self._player_id
             ),
         )
 
@@ -84,20 +91,29 @@ class DefaultActorMemoryProvider:
         self,
         actor_id: str,
         query: str,
+        state: GameState,
         *,
         user_id: Optional[int],
         player_id: Optional[int],
         top_k: int = 5,
     ) -> list[Any]:
-        # 未启用回忆 / 租户缺失 / query 为空 → 优雅降级,不调 service。
+        # 长期记忆仅 L1;NPC-Actor 无长期(spec 4.2)。
+        if not self._is_l1(actor_id):
+            return []
         if self.recall_service is None or user_id is None or player_id is None:
             return []
         if not query.strip():
             return []
-        # 检索失败绝不能打断对话:整段兜底为空。
+        turn_index = int(state["runtime"].get("turn_index", 0) or 0)
+        window_start = max(0, turn_index - self._summary_horizon_turns + 1)
         try:
-            return self.recall_service.query_recall(
-                query, user_id=user_id, player_id=player_id, top_k=top_k
+            return self.recall_service.recall_memory_blocks(
+                query,
+                user_id=user_id,
+                player_id=player_id,
+                actor_id=actor_id,
+                window_start=window_start,
+                top_k=top_k,
             )
         except Exception:  # noqa: BLE001 - 任何检索后端异常都降级为空
             return []

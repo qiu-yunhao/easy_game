@@ -386,6 +386,7 @@ def build_runtime_dependencies(
             character_profiles=character_profiles,
             recent_rounds=3,
             granularity="on_stage",
+            summary_horizon_turns=45,
         ),
         history_manager=HistoryManager(compression_trigger_size=30, summary_horizon_turns=45),
         gameplay_tuning=GameplayTuning(narration=NarrationTuning(style_preset=narration_style_preset)),

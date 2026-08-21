@@ -24,13 +24,30 @@ _PendingResult = tuple[list[Any], int]  # (all_blocks, new_last_compressed_turn)
 
 
 class AsyncMemoryCompactor:
-    def __init__(self, *, memory_store: MemoryStore) -> None:
+    def __init__(
+        self,
+        *,
+        memory_store: MemoryStore,
+        recall_service: Any = None,
+        user_id: Optional[int] = None,
+        player_id: Optional[int] = None,
+    ) -> None:
         self._store = memory_store
+        self._recall = recall_service
+        self._user_id = user_id
+        self._player_id = player_id
         self._queue: "queue.Queue[Optional[GameState]]" = queue.Queue()
         self._pending: Optional[_PendingResult] = None
         self._lock = threading.Lock()
         self._worker: Optional[threading.Thread] = None
         self._started = False
+
+    def set_tenant(self, *, user_id: Optional[int], player_id: Optional[int]) -> None:
+        self._user_id = user_id
+        self._player_id = player_id
+
+    def set_recall_service(self, service: Any) -> None:
+        self._recall = service
 
     def start(self) -> None:
         """启动后台 worker 线程（守护线程，随主进程退出）。"""
@@ -73,10 +90,25 @@ class AsyncMemoryCompactor:
             try:
                 if snapshot is None:
                     return  # 收到哨兵，退出 worker。
+                prior_cursor = int(snapshot["memory"]["last_compressed_turn"])
                 blocks, new_last = self._store.compact(snapshot)
+                self._index_new_blocks(blocks, prior_cursor)
                 with self._lock:
                     self._pending = (blocks, new_last)
             except Exception:  # 失败不写 pending，记日志，下轮重试（compact 幂等）。
                 _logger.exception("后台记忆压缩失败")
             finally:
                 self._queue.task_done()
+
+    def _index_new_blocks(self, blocks: list[Any], prior_cursor: int) -> None:
+        if self._recall is None or self._user_id is None or self._player_id is None:
+            return
+        new_blocks = [b for b in blocks if int(b.get("turn_end", 0) or 0) > prior_cursor]
+        if not new_blocks:
+            return
+        try:
+            self._recall.index_memory_blocks(
+                new_blocks, user_id=self._user_id, player_id=self._player_id
+            )
+        except Exception:  # 索引失败不影响压缩结果落地
+            _logger.exception("memory_block 索引失败")

@@ -119,6 +119,28 @@ def _strip_score_fields(item: ScoredHistoryItem) -> HistoryItem:
     }
 
 
+def _strip_score_fields_with_presence(item: ScoredHistoryItem) -> HistoryItem:
+    # 存储路径专用:在剥离评分字段的同时保留在场/地点快照,供块索引归属过滤。
+    # 不改 _strip_score_fields 本体,以免 on_stage 泄漏进摘要文本与 summarizer 载荷。
+    stripped = _strip_score_fields(item)
+    on_stage = item.get("on_stage")
+    if on_stage:
+        stripped["on_stage"] = list(on_stage)
+    location_id = item.get("location_id")
+    if location_id:
+        stripped["location_id"] = location_id
+    return stripped
+
+
+def _chunk_on_stage_union(chunk: list[ScoredHistoryItem]) -> list[str]:
+    return sorted({
+        str(cid).strip()
+        for item in chunk
+        for cid in (item.get("on_stage") or [])
+        if str(cid).strip()
+    })
+
+
 def _format_history_item(item: HistoryItem) -> str:
     actor = item["actor"] or "system"
     return f"{item['turn']}:{actor}:{item['mode']}:{item['content']}"
@@ -136,12 +158,13 @@ def build_raw_block(chunk: list[ScoredHistoryItem]) -> CompressedHistoryBlock:
         "bucket": chunk[0]["importance_bucket"],
         "turn_start": chunk[0]["turn"],
         "turn_end": chunk[-1]["turn"],
-        "raw_items": [_strip_score_fields(item) for item in chunk],
+        "raw_items": [_strip_score_fields_with_presence(item) for item in chunk],
         "summary": summary,
         "key_points": [_format_history_item(_strip_score_fields(item)) for item in chunk[:3]],
         "actors": list(dict.fromkeys(str(actor) for actor in actors)),
         "avg_score": sum(scores) / len(scores),
         "max_score": max(scores),
+        "on_stage_union": _chunk_on_stage_union(chunk),
     }
 
 
@@ -186,6 +209,7 @@ def build_summary_block(
         "actors": list(dict.fromkeys(actors)),
         "avg_score": sum(scores) / len(scores),
         "max_score": max(scores),
+        "on_stage_union": _chunk_on_stage_union(chunk),
     }
 
 
