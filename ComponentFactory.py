@@ -10,7 +10,6 @@ from GameplayTuning import SceneEndTuning
 if TYPE_CHECKING:
     from Actor.ActorAgent import ActorAgent
     from Actor.L1ActorAgent import L1ActorAgent
-    from Actor.L2ActorAgent import L2ActorAgent
     from Actor.ActorCreateAgent import ActorCreateAgent
     from Director.DirectorAgent import DirectorAgent
     from Director.DirectorFormatter import DirectorFormatter
@@ -22,7 +21,6 @@ if TYPE_CHECKING:
     from PlayerWriter.PlayerWriterFormatter import PlaywrightFormatter
     from SceneEnd.SceneEndHeuristics import SceneEndPolicy
     from Scheduler.SchedulerPolicy import SchedulerPolicy
-    from SupportingSceneIntentPolicy import SupportingSceneIntentPolicy
     from StylisticPolish import StylisticPolishAgent
 
 
@@ -54,15 +52,6 @@ class ComponentFactory:
     def build_actor_agent(self, **kwargs: object) -> "ActorAgent":
         return self._build_component("Actor.ActorAgent", "ActorAgent", **kwargs)
 
-    def build_l2_actor_agent(self, **kwargs: object) -> "L2ActorAgent":
-        policy = kwargs.pop("supporting_scene_intent_policy", None) or self.build_supporting_scene_intent_policy()
-        return self._build_component(
-            "Actor.L2ActorAgent",
-            "L2ActorAgent",
-            supporting_scene_intent_policy=policy,
-            **kwargs,
-        )
-
     def build_l1_actor_agent(self, **kwargs: object) -> "L1ActorAgent":
         return self._build_component("Actor.L1ActorAgent", "L1ActorAgent", **kwargs)
 
@@ -86,9 +75,6 @@ class ComponentFactory:
 
     def build_scheduler_policy(self) -> "SchedulerPolicy":
         return self.config.scheduler_policy_builder()
-
-    def build_supporting_scene_intent_policy(self) -> "SupportingSceneIntentPolicy":
-        return self._build_component("SupportingSceneIntentPolicy", "SupportingSceneIntentPolicy")
 
     def build_scene_end_policy(self, tuning: SceneEndTuning | None = None) -> "SceneEndPolicy":
         return self.config.scene_end_policy_builder(tuning or SceneEndTuning())

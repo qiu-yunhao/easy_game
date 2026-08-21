@@ -234,21 +234,6 @@ def build_actor_instruction(
     )
 
 
-def build_l2_actor_instruction(
-    state: GameState,
-    memory_ctx: ActorMemoryContext,
-    *,
-    policy_decision: Mapping[str, Any],
-) -> str:
-    payload = _build_actor_payload(state, memory_ctx)
-    payload["supporting_scene_intent"] = dict(policy_decision)
-    return render_json_instruction(
-        "Use the following scene context to produce one L2 supporting turn as strict JSON. "
-        "Support the scene through the suggested supporting function without stealing narrative dominance.",
-        payload,
-    )
-
-
 def build_l1_actor_instruction(
     state: GameState,
     memory_ctx: ActorMemoryContext,

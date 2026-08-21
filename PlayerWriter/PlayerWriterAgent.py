@@ -44,7 +44,7 @@ Constraints:
 - Do not leave required fields blank. Required strings must contain concrete content.
 - When `loaded_tool_skills` is provided, inspect those skill modules first and follow their tool definitions instead of inventing your own.
 - Before proposing new supporting roles or role upgrades, inspect the provided `character_roster_snapshot`.
-- If `character_roster_snapshot` shows that L1 or L2 capacity is full, reuse an existing role or downgrade the function instead of silently over-creating.
+- If `character_roster_snapshot` shows that L1 capacity is full, reuse an existing role or downgrade the function instead of silently over-creating.
 """
 
 
