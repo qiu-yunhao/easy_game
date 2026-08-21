@@ -276,7 +276,7 @@ TOOL_SKILLS: tuple[ToolSkillDefinition, ...] = (
                         },
                         "layer_filter": {
                             "type": "string",
-                            "enum": ["L1", "L2", "ActorAgent", "all"],
+                            "enum": ["L1", "ActorAgent", "all"],
                             "description": "Filter by story layer.",
                         },
                     },
@@ -381,7 +381,7 @@ def _story_roster_snapshot_has_signal(character_roster_snapshot: Mapping[str, An
         return False
     summary = character_roster_snapshot.get("summary", {})
     if isinstance(summary, Mapping):
-        for key in ("total_L1", "total_L2", "total_ActorAgent", "filtered_total"):
+        for key in ("total_L1", "total_ActorAgent", "filtered_total"):
             if int(summary.get(key, 0) or 0) > 0:
                 return True
     characters = character_roster_snapshot.get("characters", [])

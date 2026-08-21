@@ -37,7 +37,7 @@ CHARACTER_ROSTER_TOOL_SCHEMA: dict[str, Any] = (
                 "layer_filter": {
                     "type": "string",
                     "enum": list(VALID_CHARACTER_ROSTER_FILTERS),
-                    "description": "Filter the roster to L1, L2, ActorAgent, or all.",
+                    "description": "Filter the roster to L1, ActorAgent, or all.",
                 },
             },
             "required": ["player_id"],
@@ -71,10 +71,10 @@ class CharacterRosterResult(TypedDict):
     decision_hints: dict[str, CharacterRosterDecisionHint]
 def _resolve_roster_layer_from_profile(profile: Mapping[str, Any]) -> str:
     story_layer = clean_text(profile.get("story_layer", ""))
-    if story_layer in {"L1", "L2"}:
+    if story_layer == "L1":
         return story_layer
     agent_type = clean_text(profile.get("agent_type", "actor"), "actor")
-    return agent_type if agent_type in {"L1", "L2"} else "ActorAgent"
+    return agent_type if agent_type == "L1" else "ActorAgent"
 
 
 def _normalize_player_id(value: Any) -> int | None:
@@ -106,7 +106,6 @@ def build_runtime_character_roster(
     normalized_filter = normalize_roster_layer_filter(layer_filter)
     characters: list[dict[str, Any]] = []
     total_l1 = 0
-    total_l2 = 0
     total_actor = 0
 
     for character_id, profile in profiles.items():
@@ -115,8 +114,6 @@ def build_runtime_character_roster(
         layer = _resolve_roster_layer_from_profile(profile)
         if layer == "L1":
             total_l1 += 1
-        elif layer == "L2":
-            total_l2 += 1
         else:
             total_actor += 1
         if not matches_roster_layer(layer, normalized_filter):
@@ -147,7 +144,6 @@ def build_runtime_character_roster(
         slot_name=slot_name,
         layer_filter=normalized_filter,
         total_l1=total_l1,
-        total_l2=total_l2,
         total_actor=total_actor,
         filtered_total=len(characters),
     )
