@@ -394,8 +394,7 @@ class GameSaveStore:
             total_l1 = 0
             for row in story_rows:
                 layer = clean_text(row.agent_layer, "L1")
-                layer = layer if layer == "L1" else "L1"
-                total_l1 += int(layer == "L1")
+                total_l1 += 1
                 if not matches_roster_layer(layer, normalized_filter):
                     continue
                 profile_snapshot = row.profile_snapshot_json if isinstance(row.profile_snapshot_json, dict) else {}
