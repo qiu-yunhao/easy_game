@@ -15,6 +15,11 @@ VectorDoc,与场景级 scene_summary/act_chunk 隔离,并行存在互不干扰�
 
 
 def _on_stage_union(block: dict[str, Any]) -> list[str]:
+    # 优先用块级 on_stage_union(summary 块无 raw_items 时唯一的归属信号);
+    # 缺失时回退到 raw_items 逐条 on_stage 的并集。
+    block_level = block.get("on_stage_union")
+    if block_level:
+        return sorted({str(c).strip() for c in block_level if str(c).strip()})
     union: set[str] = set()
     for item in block.get("raw_items", []) or []:
         for cid in item.get("on_stage", []) or []:

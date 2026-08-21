@@ -53,3 +53,31 @@ def test_empty_text_block_skipped():
     block["key_points"] = []
     docs = build_block_docs([block], user_id=1, player_id=1)
     assert docs == []
+
+
+def test_block_level_on_stage_union_preferred_for_summary_block():
+    # summary 形态:raw_items 为空,归属只能靠块级 on_stage_union。
+    block = {
+        "kind": "summary",
+        "bucket": "mid",
+        "turn_start": 4,
+        "turn_end": 6,
+        "raw_items": [],
+        "summary": "a summary",
+        "key_points": ["kp1"],
+        "actors": ["hero", "npc"],
+        "avg_score": 0.5,
+        "max_score": 0.9,
+        "on_stage_union": ["hero", "npc"],
+    }
+    doc = build_block_docs([block], user_id=7, player_id=2)[0]
+    assert doc.metadata["on_stage_union"] == ["hero", "npc"]
+
+
+def test_block_level_on_stage_union_wins_over_raw_items():
+    # raw 形态:块级字段存在时优先于逐条并集(证明 indexer 偏好块级信号)。
+    block = _block(1, 3, [["ignored_a"], ["ignored_b"], ["ignored_c"]])
+    block["kind"] = "raw"
+    block["on_stage_union"] = ["hero", "npc"]
+    doc = build_block_docs([block], user_id=7, player_id=2)[0]
+    assert doc.metadata["on_stage_union"] == ["hero", "npc"]
