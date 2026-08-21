@@ -62,7 +62,7 @@ def upsert_story_character_templates(db: Session, templates: list[dict[str, Any]
         display_name = clean_text(raw.get("display_name") or raw.get("name"))
         occupation = clean_text(raw.get("occupation"))
         template_kind = clean_text(raw.get("template_kind") or raw.get("story_layer") or raw.get("agent_type"), "actor")
-        if template_kind not in {"actor", "L2", "L1"}:
+        if template_kind not in {"actor", "L1"}:
             template_kind = "actor"
         template_key = clean_text(raw.get("template_key") or raw.get("character_id"))
         if not template_key and display_name:
@@ -102,7 +102,7 @@ def seed_starter_story_characters(db: Session, player_id: int) -> None:
             select(StoryCharacterTemplate)
             .where(
                 StoryCharacterTemplate.starter_enabled.is_(True),
-                StoryCharacterTemplate.template_kind.in_(("L1", "L2")),
+                StoryCharacterTemplate.template_kind.in_(("L1",)),
             )
             .order_by(StoryCharacterTemplate.id.asc())
         )
@@ -168,13 +168,13 @@ def upsert_story_characters(db: Session, player_id: int, session_snapshot: dict[
                 actor_character_id=actor_character_id,
                 display_name=record["display_name"],
                 template_id=matched_template.id if matched_template is not None else None,
-                agent_layer=clean_text(record.get("agent_layer"), "L2"),
+                agent_layer=clean_text(record.get("agent_layer"), "L1"),
             )
             db.add(row)
             existing_rows[actor_character_id] = row
         row.display_name = record["display_name"]
         row.avatar_url = record["avatar_url"]
-        row.agent_layer = clean_text(record.get("agent_layer"), row.agent_layer or "L2")
+        row.agent_layer = clean_text(record.get("agent_layer"), row.agent_layer or "L1")
         row.has_met = bool(record["has_met"])
         row.affection_score = record["affection_score"]
         row.life_status = record["life_status"]

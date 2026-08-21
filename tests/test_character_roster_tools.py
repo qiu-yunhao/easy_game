@@ -154,9 +154,8 @@ class CharacterRosterToolTests(unittest.TestCase):
         )
 
         self.assertEqual(roster["summary"]["total_L1"], 2)
-        self.assertEqual(roster["summary"]["total_L2"], 0)
         self.assertEqual(roster["summary"]["total_ActorAgent"], 1)
-        self.assertEqual(roster["decision_hints"]["L1"]["max_count"], 6)
+        self.assertEqual(roster["decision_hints"]["L1"]["max_count"], 21)
         self.assertTrue(roster["decision_hints"]["L1"]["allowed"])
         self.assertEqual([item["layer"] for item in actor_only["characters"]], ["ActorAgent"])
         self.assertEqual(actor_only["characters"][0]["display_name"], "药铺掌柜")
@@ -198,9 +197,7 @@ class CharacterRosterToolTests(unittest.TestCase):
             character_roster_snapshot={
                 "summary": {
                     "total_L1": 2,
-                    "max_L1": 6,
-                    "total_L2": 4,
-                    "max_L2": 15,
+                    "max_L1": 21,
                     "total_ActorAgent": 5,
                 },
                 "characters": [],
@@ -221,7 +218,7 @@ class CharacterRosterToolTests(unittest.TestCase):
         )
         self.assertIn("character_status_snapshot", payload)
         self.assertIn("character_roster_snapshot", payload)
-        self.assertEqual(payload["character_roster_snapshot"]["summary"]["total_L2"], 4)
+        self.assertEqual(payload["character_roster_snapshot"]["summary"]["total_L1"], 2)
         self.assertEqual(payload["character_status_snapshot"]["player_profile"]["character_id"], "player")
         self.assertNotIn("background", payload["character_status_snapshot"]["player_profile"])
         self.assertNotIn("scene", payload["character_status_snapshot"])
@@ -272,9 +269,7 @@ class CharacterRosterToolTests(unittest.TestCase):
             character_roster_snapshot={
                 "summary": {
                     "total_L1": 1,
-                    "max_L1": 6,
-                    "total_L2": 1,
-                    "max_L2": 15,
+                    "max_L1": 21,
                     "total_ActorAgent": 1,
                 },
                 "characters": [],

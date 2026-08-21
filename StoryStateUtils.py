@@ -47,17 +47,14 @@ def matches_lookup(target: Any, *candidates: Any) -> bool:
     return False
 
 
-MAX_L1_CHARACTERS = 6
-MAX_L2_CHARACTERS = 15
-VALID_CHARACTER_ROSTER_FILTERS = ("L1", "L2", "ActorAgent", "all")
+MAX_L1_CHARACTERS = 21
+VALID_CHARACTER_ROSTER_FILTERS = ("L1", "ActorAgent", "all")
 
 
 def normalize_roster_layer_filter(value: Any) -> str:
     lowered = clean_text(value, "all").lower().replace("_", "").replace("-", "")
     if lowered == "l1":
         return "L1"
-    if lowered == "l2":
-        return "L2"
     if lowered in {"actor", "actoragent", "actors"}:
         return "ActorAgent"
     return "all"
@@ -80,7 +77,6 @@ def build_character_roster_summary(
     slot_name: str,
     layer_filter: Any,
     total_l1: int,
-    total_l2: int,
     total_actor: int,
     filtered_total: int,
 ) -> dict[str, Any]:
@@ -92,21 +88,18 @@ def build_character_roster_summary(
         "total_L1": total_l1,
         "max_L1": MAX_L1_CHARACTERS,
         "remaining_L1": _remaining_count(total_l1, MAX_L1_CHARACTERS),
-        "total_L2": total_l2,
-        "max_L2": MAX_L2_CHARACTERS,
-        "remaining_L2": _remaining_count(total_l2, MAX_L2_CHARACTERS),
         "total_ActorAgent": total_actor,
         "max_ActorAgent": None,
         "remaining_ActorAgent": None,
-        "total_player_bound": total_l1 + total_l2,
-        "total_all": total_l1 + total_l2 + total_actor,
+        "total_player_bound": total_l1,
+        "total_all": total_l1 + total_actor,
         "filtered_total": filtered_total,
     }
 
 
 def build_character_roster_decision_hints(summary: dict[str, Any]) -> dict[str, dict[str, Any]]:
     hints: dict[str, dict[str, Any]] = {}
-    for layer in ("L1", "L2", "ActorAgent"):
+    for layer in ("L1", "ActorAgent"):
         current_count = int(summary.get(f"total_{layer}", 0) or 0)
         raw_max = summary.get(f"max_{layer}")
         max_count = int(raw_max) if isinstance(raw_max, (int, float)) else None
@@ -185,7 +178,6 @@ def serialize_story_cast_member(
     character_id: str,
     profile: "CharacterProfile",
 ) -> dict[str, Any]:
-    l2_profile = profile.get("l2_profile", {})
     l1_profile = profile.get("l1_profile", {})
     layer_assignment = profile.get("layer_assignment", {})
     memory_profile = profile.get("memory_profile", {})
@@ -203,7 +195,6 @@ def serialize_story_cast_member(
         "story_layer": clean_text(profile.get("story_layer", "actor"), "actor"),
         "storage_mode": clean_text(profile.get("storage_mode", "player_bound_instance"), "player_bound_instance"),
         "occupation": clean_text(profile.get("occupation", "")),
-        "l2_profile": dict(l2_profile) if isinstance(l2_profile, dict) else {},
         "l1_profile": dict(l1_profile) if isinstance(l1_profile, dict) else {},
         "layer_assignment": dict(layer_assignment) if isinstance(layer_assignment, dict) else {},
         "memory_profile": dict(memory_profile) if isinstance(memory_profile, dict) else {},

@@ -16,13 +16,10 @@ from __future__ import annotations
 # ---------------------------------------------------------------------------
 # 容量常量
 # ---------------------------------------------------------------------------
-# L1 / L2 演员在同一场故事中的数量上限：
-# - L1（核心角色）最多 6 位，承担长期主线冲突。
-# - L2（重要配角）最多 15 位，作为可发展的支持角色池。
-# - MAX_STORY_CHARACTERS 是同一剧本内可存在的"非玩家"命名角色总上限。
-MAX_L1_AGENTS = 6
-MAX_L2_AGENTS = 15
-MAX_STORY_CHARACTERS = MAX_L1_AGENTS + MAX_L2_AGENTS
+# L1（核心角色）在同一场故事中的数量上限，承担长期主线冲突。
+# MAX_STORY_CHARACTERS 是同一剧本内可存在的"非玩家"命名角色总上限。
+MAX_L1_AGENTS = 21
+MAX_STORY_CHARACTERS = 21
 
 
 # ---------------------------------------------------------------------------
@@ -58,45 +55,8 @@ BACKSTORY_RELATION_HINTS = (
 
 
 # ---------------------------------------------------------------------------
-# L2 / L1 剧本档 schema
+# L1 剧本档 schema
 # ---------------------------------------------------------------------------
-L2_PROFILE_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "core_drive": {"type": "string", "minLength": 1},
-        "judgement_preference": {
-            "type": "array",
-            "items": {"type": "string"},
-            "minItems": 1,
-            "maxItems": 2,
-        },
-        "behavior_rule": {
-            "type": "array",
-            "items": {"type": "string"},
-            "minItems": 1,
-            "maxItems": 2,
-        },
-        "speech_style": {
-            "type": "array",
-            "items": {"type": "string"},
-            "minItems": 1,
-            "maxItems": 2,
-        },
-        "personality_tags": {
-            "type": "array",
-            "items": {"type": "string"},
-        },
-    },
-    "required": [
-        "core_drive",
-        "judgement_preference",
-        "behavior_rule",
-        "speech_style",
-        "personality_tags",
-    ],
-    "additionalProperties": False,
-}
-
 L1_PROFILE_SCHEMA = {
     "type": "object",
     "properties": {
@@ -168,10 +128,9 @@ SUPPORTING_CHARACTER_PROPERTIES = {
     "race": {"type": "string"},
     "agent_type": {
         "type": "string",
-        "enum": ["actor", "L2", "L1"],
+        "enum": ["actor", "L1"],
     },
     "layer_assignment": LAYER_ASSIGNMENT_SCHEMA,
-    "l2_profile": L2_PROFILE_SCHEMA,
     "l1_profile": L1_PROFILE_SCHEMA,
     "spiritual_root": {"type": "string"},
     "realm": {"type": "string"},
@@ -259,10 +218,8 @@ CONTEXTUAL_ACTOR_RESPONSE_SCHEMA = {
 
 __all__ = [
     "MAX_L1_AGENTS",
-    "MAX_L2_AGENTS",
     "MAX_STORY_CHARACTERS",
     "BACKSTORY_RELATION_HINTS",
-    "L2_PROFILE_SCHEMA",
     "L1_PROFILE_SCHEMA",
     "LAYER_ASSIGNMENT_SCHEMA",
     "SUPPORTING_CHARACTER_PROPERTIES",

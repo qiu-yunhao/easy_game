@@ -121,7 +121,6 @@ def _serialize_profile(profile: dict[str, Any] | None) -> dict[str, Any] | None:
         "story_layer": normalized.get("story_layer", "actor"),
         "storage_mode": normalized.get("storage_mode", "player_bound_instance"),
         "occupation": normalized.get("occupation", ""),
-        "l2_profile": dict(normalized.get("l2_profile", {})),
         "l1_profile": dict(normalized.get("l1_profile", {})),
         "layer_assignment": dict(normalized.get("layer_assignment", {})),
         "memory_profile": dict(normalized.get("memory_profile", {})),

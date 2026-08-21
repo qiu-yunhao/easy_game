@@ -146,7 +146,7 @@ class PlayerStoryCharacter(TimestampMixin, Base):
     actor_character_id: Mapped[str] = mapped_column(String(128), nullable=False)
     display_name: Mapped[str] = mapped_column(String(128), nullable=False)
     avatar_url: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    agent_layer: Mapped[str] = mapped_column(String(16), nullable=False, default="L2")
+    agent_layer: Mapped[str] = mapped_column(String(16), nullable=False, default="L1")
     has_met: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     affection_score: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False, default=0)
     life_status: Mapped[str] = mapped_column(String(32), nullable=False, default="alive")

@@ -16,11 +16,11 @@ and to assign each new role into the correct interactive layer.
 
 Rules:
 - Return strict JSON only.
-- Never exceed the provided player-bound L1/L2 limits unless the role is explicitly protected by the player-backstory rule.
-- Base `actor` roles are reusable ActorAgent templates and are not constrained by the L1/L2 caps.
+- Never exceed the provided player-bound L1 limit unless the role is explicitly protected by the player-backstory rule.
+- Base `actor` roles are reusable ActorAgent templates and are not constrained by the L1 cap.
 - Before creating or upgrading any role, inspect the provided `character_roster_snapshot`.
 - When `loaded_tool_skills` is provided, inspect those skill modules first and follow their tool contracts exactly.
-- If the roster snapshot shows that an L1 or L2 layer is already full, reuse an existing role or downgrade the function unless the player-backstory rule explicitly protects the role.
+- If the roster snapshot shows that the L1 layer is already full, reuse an existing role or downgrade the function unless the player-backstory rule explicitly protects the role.
 - Reuse existing supporting character ids when the same person already exists.
 - If no story outline exists yet, only extract characters that the player clearly implied in the background.
 - If a story outline exists, create only the minimum supplemental cast needed to support those chapters.
@@ -29,14 +29,11 @@ Rules:
 - Every character must include `spiritual_root`, `realm`, and `main_technique`, even when they are ordinary defaults.
 - You are also responsible for `agent_type` assignment:
   - Use base `actor` for reusable functional roles that mainly provide atmosphere, logistics, simple guidance, or one-shot scene support.
-  - Any character clearly mentioned in the player's background by name, title, or explicit relationship must be at least interactive (`L2` or `L1`), never a discardable background extra.
+  - Any character clearly mentioned in the player's background by name, title, or explicit relationship must be interactive (`L1`), never a discardable background extra.
   - Use `L1` for long-term mainline roles, deep bonds, irreplaceable rivals, blood/fate ties, or characters expected to carry major turning points across chapters.
-  - Use `L2` for important but softer support roles that mainly serve a scene, chapter, route, or short-term functional need.
   - Prefer `actor` when the role is replaceable, single-purpose, and does not need long-lived autonomous planning.
-  - If a background-mentioned role matters but their long-term weight is still unclear, choose `L2`, not `L1`.
-  - You may mark an `L2` with `layer_assignment.can_promote_to_l1 = true` when the role could later be upgraded.
+  - If a role's long-term weight is still unclear, lean `actor`; when the role carries genuine long-term weight, choose `L1`.
 - Every generated role must include `layer_assignment`.
-- If `agent_type = "L2"`, include a compact `l2_profile`.
 - If `agent_type = "L1"`, include a complete `l1_profile`.
 - `planned_chapter_ids` may only use chapter ids that were provided to you.
 """

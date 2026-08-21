@@ -8,11 +8,11 @@
    `_infer_backstory_priority`（触发容量守卫中的"背景保护"豁免）。
 3. **layer_assignment 与 agent_type 推断**：
    `_build_layer_assignment_seed`（explicit > existing > 推断默认 合并），
-   `_resolve_story_agent_type`（背景/显式/长期或多章 三路径），
+   `_resolve_story_agent_type`（背景/显式/长期或多章 两路径），
    `_count_story_layers`, `_resolve_effective_roster_counts`。
 4. **容量守卫（下调 agent_type 到当前预算内）**：
-   `_respect_agent_layer_limits`（按 MAX_L1_AGENTS/MAX_L2_AGENTS 下调
-   L1→L2→actor，背景保护豁免），
+   `_respect_agent_layer_limits`（按 MAX_L1_AGENTS 下调
+   L1→actor，背景保护豁免），
    `_respect_player_bound_capacity`（按 max_total_characters 再守卫）。
 
 约定：函数都是包内私有（`_` 前缀），仅 `ActorCreateAgent` 经 `__all__`
@@ -27,7 +27,6 @@ from typing import TYPE_CHECKING, Any, Mapping
 from Actor.ActorCreateSchema import (
     BACKSTORY_RELATION_HINTS,
     MAX_L1_AGENTS,
-    MAX_L2_AGENTS,
 )
 from StoryStateUtils import clean_text
 
@@ -311,91 +310,75 @@ def _resolve_story_agent_type(
     """从 layer_assignment_seed + 显式声明中挑选最终 agent_type。
 
     调用时机：`_build_layer_assignment_seed` 之后紧接着调用，产出
-    最终 agent_type（`actor` / `L1` / `L2`），随后会被两个容量守卫
+    最终 agent_type（`actor` / `L1`），随后会被两个容量守卫
     再次可能下调。
 
     判定路径：
         - 先规范化 explicit_agent_type（raw > existing），仅接受
-          `{actor, L1, L2}`，其他视作空。
+          `{actor, L1}`，其他视作空。
 
         **玩家背景提及规则**（`mentioned_in_player_backstory == True`）
-        优先于显式，因为背景保护要求角色至少是可交互的 L2/L1：
-            - explicit == "L1"：直接 L1。
-            - 或 `long_term_plot_significance` / `plot_significance == "core"`
-              / `relationship_depth == "deep"`：升为 L1。
-            - 否则至少 L2（**不允许背景提及的角色掉为 actor**）。
+        优先于显式，因为背景保护要求角色至少是可交互的 L1：
+            - 一律升为 L1（**不允许背景提及的角色掉为 actor**）。
 
         **未被背景提及**：
             - explicit 非空 → 采纳 explicit。
-            - `long_term_plot_significance` / 多章 (`>=2`) / core → L1。
             - `plot_significance == "replaceable"` → actor。
-            - 其他默认 L2。
+            - 其他默认 L1。
 
-    返回：字符串 `"actor" | "L1" | "L2"`。
+    返回：字符串 `"actor" | "L1"`。
     """
     explicit_agent_type = clean_text(
         raw_character.get("agent_type", ""),
         clean_text(existing_profile.get("agent_type", "")),
     )
-    if explicit_agent_type not in {"actor", "L1", "L2"}:
+    if explicit_agent_type not in {"actor", "L1"}:
         explicit_agent_type = ""
 
     mentioned_in_player_backstory = bool(layer_assignment_seed.get("mentioned_in_player_backstory", False))
-    long_term_plot_significance = bool(layer_assignment_seed.get("long_term_plot_significance", False))
     plot_significance = clean_text(layer_assignment_seed.get("plot_significance", ""), "supporting")
-    relationship_depth = clean_text(layer_assignment_seed.get("relationship_depth", ""), "unknown")
-    multi_chapter_presence = planned_chapter_count >= 2 or len(planned_chapter_ids) >= 2
 
     if mentioned_in_player_backstory:
-        if explicit_agent_type == "L1":
-            return "L1"
-        if long_term_plot_significance or plot_significance == "core" or relationship_depth == "deep":
-            return "L1"
-        return "L2"
+        return "L1"
 
     if explicit_agent_type:
         return explicit_agent_type
-    if long_term_plot_significance or multi_chapter_presence or plot_significance == "core":
-        return "L1"
     if plot_significance == "replaceable":
         return "actor"
-    return "L2"
+    return "L1"
 
 
-def _count_story_layers(character_profiles: dict[str, "CharacterProfile"]) -> tuple[int, int]:
-    """统计当前本地 profiles 中 L1 / L2 的数量。
+def _count_story_layers(character_profiles: dict[str, "CharacterProfile"]) -> int:
+    """统计当前本地 profiles 中 L1 的数量。
 
     调用时机：`_resolve_effective_roster_counts` 内部；也可直接在
     `ActorCreateAgent` 里做本地占用量即时检查。规则：按
-    `profile.agent_type` 严格判 `"L1" / "L2"`（clean 后默认视为 actor）。
-    返回：`(l1_count, l2_count)`。
+    `profile.agent_type` 严格判 `"L1"`（clean 后默认视为 actor）。
+    返回：`l1_count`。
     """
     l1_count = 0
-    l2_count = 0
     for profile in character_profiles.values():
         agent_type = clean_text(profile.get("agent_type", ""), "actor")
         if agent_type == "L1":
             l1_count += 1
-        elif agent_type == "L2":
-            l2_count += 1
-    return l1_count, l2_count
+    return l1_count
 
 
 def _resolve_effective_roster_counts(
     character_profiles: dict[str, "CharacterProfile"],
     character_roster_snapshot: Mapping[str, Any] | None,
-) -> tuple[int, int, int]:
+) -> tuple[int, int]:
     """得到"本地 profiles + 全局 roster 快照"合并后的有效计数。
 
     调用时机：容量守卫（`_respect_agent_layer_limits` /
     `_respect_player_bound_capacity`）在决策前需要一个**保守**的现有
     占用量估计；本函数取 local / roster 两侧 **max**，避免只看单侧
-    低估占用。local 从 character_profiles 数出 L1/L2/actor（player
+    低估占用。local 从 character_profiles 数出 L1/actor（player
     不计入 actor）；roster 从 `character_roster_snapshot["summary"]`
-    读 `total_L1/total_L2/total_ActorAgent`，缺省按 0 计。
-    返回：`(effective_l1, effective_l2, effective_actor)`。
+    读 `total_L1/total_ActorAgent`，缺省按 0 计。
+    返回：`(effective_l1, effective_actor)`。
     """
-    local_l1_count, local_l2_count = _count_story_layers(character_profiles)
+    local_l1_count = _count_story_layers(character_profiles)
     local_actor_count = sum(
         1
         for character_id, profile in character_profiles.items()
@@ -407,11 +390,9 @@ def _resolve_effective_roster_counts(
         else {}
     )
     roster_l1_count = int(summary.get("total_L1", 0) or 0) if isinstance(summary, Mapping) else 0
-    roster_l2_count = int(summary.get("total_L2", 0) or 0) if isinstance(summary, Mapping) else 0
     roster_actor_count = int(summary.get("total_ActorAgent", 0) or 0) if isinstance(summary, Mapping) else 0
     return (
         max(local_l1_count, roster_l1_count),
-        max(local_l2_count, roster_l2_count),
         max(local_actor_count, roster_actor_count),
     )
 
@@ -421,39 +402,31 @@ def _respect_agent_layer_limits(
     resolved_agent_type: str,
     layer_assignment: Mapping[str, Any],
     existing_l1_count: int,
-    existing_l2_count: int,
     new_l1_count: int,
-    new_l2_count: int,
 ) -> str:
-    """按 L1/L2 数量上限把 agent_type 下调到当前预算内。
+    """按 L1 数量上限把 agent_type 下调到当前预算内。
 
     调用时机：`_resolve_story_agent_type` 得到"理想 agent_type"后，
-    先由本函数按 `MAX_L1_AGENTS / MAX_L2_AGENTS` 做第一次容量守卫。
+    先由本函数按 `MAX_L1_AGENTS` 做第一次容量守卫。
 
-    下调路径 **L1 → L2 → actor**：
+    下调路径 **L1 → actor**：
         - 若 resolved == "L1"：
             - 当 `existing_l1 + new_l1 < MAX_L1_AGENTS` 或角色被玩家
               背景提及（**背景保护例外**）→ 保持 L1。
-            - 否则下调为 L2，进入下一步继续判断。
-        - 若（下调后或原本就是）"L2"：
-            - 当 `existing_l2 + new_l2 < MAX_L2_AGENTS` 或背景提及 → 保持 L2。
             - 否则下调为 actor。
         - 其他（原本就是 actor）：原样返回。
 
     **背景保护例外**：`layer_assignment.mentioned_in_player_backstory`
     为 True 的角色不参与下调，即便超额也保留原层级。
 
-    返回：最终 agent_type（`"actor" | "L1" | "L2"`）。
+    返回：最终 agent_type（`"actor" | "L1"`）。
     """
     mentioned_in_player_backstory = bool(layer_assignment.get("mentioned_in_player_backstory", False))
     if resolved_agent_type == "L1":
         if existing_l1_count + new_l1_count < MAX_L1_AGENTS or mentioned_in_player_backstory:
             return "L1"
-        resolved_agent_type = "L2"
-    if resolved_agent_type == "L2":
-        if existing_l2_count + new_l2_count < MAX_L2_AGENTS or mentioned_in_player_backstory:
-            return "L2"
-    return "actor"
+        return "actor"
+    return resolved_agent_type
 
 
 def _respect_player_bound_capacity(
@@ -462,32 +435,30 @@ def _respect_player_bound_capacity(
     layer_assignment: Mapping[str, Any],
     max_total_characters: int,
     existing_l1_count: int,
-    existing_l2_count: int,
     new_l1_count: int,
-    new_l2_count: int,
 ) -> str:
     """按 max_total_characters（玩家绑定命名角色总额）做第二次容量守卫。
 
     调用时机：`_respect_agent_layer_limits` 之后再次守卫；仅对已经
-    是 L1 或 L2 的角色生效——纯 actor 不占用玩家绑定名额，直接放行。
+    是 L1 的角色生效——纯 actor 不占用玩家绑定名额，直接放行。
 
     分支规则：
-        - resolved 不属于 `{"L1", "L2"}` → 原样返回。
+        - resolved 不是 `"L1"` → 原样返回。
         - `max_total_characters <= 0`：视为**关闭了玩家绑定名额**，
             - 背景提及 → 保留原层级；
             - 否则一律降为 `"actor"`。
-        - 否则计 `current = existing_l1 + existing_l2 + new_l1 + new_l2`：
+        - 否则计 `current = existing_l1 + new_l1`：
             - `current < max_total_characters` 或背景提及 → 原样返回。
             - 已达/超额且非背景保护 → 降为 `"actor"`。
 
-    返回：最终 agent_type（`"actor" | "L1" | "L2"`）。
+    返回：最终 agent_type（`"actor" | "L1"`）。
     """
-    if resolved_agent_type not in {"L1", "L2"}:
+    if resolved_agent_type != "L1":
         return resolved_agent_type
     if max_total_characters <= 0:
         return resolved_agent_type if bool(layer_assignment.get("mentioned_in_player_backstory", False)) else "actor"
 
-    current_story_bound_count = existing_l1_count + existing_l2_count + new_l1_count + new_l2_count
+    current_story_bound_count = existing_l1_count + new_l1_count
     if current_story_bound_count < max_total_characters or bool(
         layer_assignment.get("mentioned_in_player_backstory", False)
     ):

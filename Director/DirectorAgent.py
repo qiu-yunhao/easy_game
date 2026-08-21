@@ -34,7 +34,6 @@ Constraints:
 - Respect `scene_plan.must_happen` and `scene_plan.must_not_happen`.
 - Treat role tiers differently:
   - L1 roles are major dramatic carriers. Prefer them when the beat needs conflict escalation, revelation, hard choices, or relationship turning points.
-  - L2 roles are support-heavy. Use them to Help, Block, Buffer, or Inform, but do not let them steal the chapter's dramatic center without a strong reason.
 - NPC appearance after an environment change is optional, not automatic.
 - If no extra role is needed, keep `stage_actions.enter` empty and let the scene remain as-is.
 - `stage_actions.enter` may only use actor ids listed in `available_stage_candidates`.
@@ -46,7 +45,7 @@ Constraints:
 - Do not let `wrap_up_text` end with system instructions such as asking the player to choose an action.
 - Leave `lead_in_text` or `wrap_up_text` empty if no transition prose is needed.
 - If you consider adding, upgrading, or reusing extra roles, inspect `character_roster_snapshot` first.
-- Do not implicitly create a new L1/L2 function when the roster snapshot shows that the layer is already at capacity.
+- Do not implicitly create a new L1 function when the roster snapshot shows that the layer is already at capacity.
 - Return strict JSON only.
 """
 

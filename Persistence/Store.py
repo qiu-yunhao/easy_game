@@ -392,12 +392,9 @@ class GameSaveStore:
 
             characters: list[dict[str, object]] = []
             total_l1 = 0
-            total_l2 = 0
             for row in story_rows:
-                layer = clean_text(row.agent_layer, "L2")
-                layer = layer if layer in {"L1", "L2"} else "L2"
-                total_l1 += int(layer == "L1")
-                total_l2 += int(layer == "L2")
+                layer = clean_text(row.agent_layer, "L1")
+                total_l1 += 1
                 if not matches_roster_layer(layer, normalized_filter):
                     continue
                 profile_snapshot = row.profile_snapshot_json if isinstance(row.profile_snapshot_json, dict) else {}
@@ -464,7 +461,6 @@ class GameSaveStore:
                 slot_name=player.slot_name,
                 layer_filter=normalized_filter,
                 total_l1=total_l1,
-                total_l2=total_l2,
                 total_actor=total_actor,
                 filtered_total=len(characters),
             )
