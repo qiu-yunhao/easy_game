@@ -31,8 +31,8 @@ def _build_session_with_story_character() -> WebGameSession:
         "character_id": "mentor_liu",
         "name": "刘执事",
         "story_role": "登场执事",
-        "agent_type": "L2",
-        "story_layer": "L2",
+        "agent_type": "L1",
+        "story_layer": "L1",
         "background": "负责看守云峰入门台的执事。",
         "spiritual_root": "金灵根",
         "realm": "筑基初期",
@@ -173,13 +173,13 @@ class PersistenceSaveLoadTests(unittest.TestCase):
                     "template_key": "starter_guard",
                     "display_name": "山门守卫",
                     "starter_enabled": True,
-                    "template_kind": "L2",
+                    "template_kind": "L1",
                     "default_profile_json": {
                         "character_id": "starter_guard",
                         "name": "山门守卫",
                         "story_role": "初始守卫模板",
-                        "agent_type": "L2",
-                        "story_layer": "L2",
+                        "agent_type": "L1",
+                        "story_layer": "L1",
                     },
                     "default_runtime_json": {
                         "life_status": "alive",
@@ -220,7 +220,7 @@ class PersistenceSaveLoadTests(unittest.TestCase):
         self.assertTrue(story_characters["mentor_liu"]["has_met"])
         self.assertAlmostEqual(story_characters["mentor_liu"]["affection_score"], 4.5)
         self.assertEqual(story_characters["mentor_liu"]["dialogue_flags_json"], ["greeting.unlocked"])
-        self.assertEqual(story_characters["mentor_liu"]["agent_layer"], "L2")
+        self.assertEqual(story_characters["mentor_liu"]["agent_layer"], "L1")
 
         self.assertEqual(len(loaded["actor_interactions"]), 1)
         self.assertEqual(loaded["actor_interactions"][0]["met_count"], 1)

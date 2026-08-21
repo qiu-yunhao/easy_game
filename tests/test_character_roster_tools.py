@@ -77,8 +77,8 @@ def _build_roster_session() -> WebGameSession:
     session.character_profiles["mentor_liu"] = {
         "character_id": "mentor_liu",
         "name": "柳前辈",
-        "story_layer": "L2",
-        "agent_type": "L2",
+        "story_layer": "L1",
+        "agent_type": "L1",
         "background": "暂住在山门外的引路人。",
         "story_role": "阶段引路者",
         "base_relationship": {"player": 2.0},
@@ -153,8 +153,8 @@ class CharacterRosterToolTests(unittest.TestCase):
             layer_filter="ActorAgent",
         )
 
-        self.assertEqual(roster["summary"]["total_L1"], 1)
-        self.assertEqual(roster["summary"]["total_L2"], 1)
+        self.assertEqual(roster["summary"]["total_L1"], 2)
+        self.assertEqual(roster["summary"]["total_L2"], 0)
         self.assertEqual(roster["summary"]["total_ActorAgent"], 1)
         self.assertEqual(roster["decision_hints"]["L1"]["max_count"], 6)
         self.assertTrue(roster["decision_hints"]["L1"]["allowed"])
@@ -173,8 +173,8 @@ class CharacterRosterToolTests(unittest.TestCase):
         roster = runtime.query_character_roster({"layer_filter": "L1"})
 
         self.assertEqual(roster["source"], "runtime_fallback")
-        self.assertEqual(roster["summary"]["total_L1"], 1)
-        self.assertEqual(roster["summary"]["filtered_total"], 1)
+        self.assertEqual(roster["summary"]["total_L1"], 2)
+        self.assertEqual(roster["summary"]["filtered_total"], 2)
         self.assertEqual(roster["characters"][0]["layer"], "L1")
 
     def test_playwright_formatter_includes_character_roster_snapshot_payload(self) -> None:

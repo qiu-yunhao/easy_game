@@ -1,11 +1,17 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from typing import TYPE_CHECKING, Any
 
 from GameplayTuning import RelationshipTuning
+from History.GameMemory import empty_memory_state
 
 if TYPE_CHECKING:
     from History.HistoryManager import HistoryManager, MemoryState
+
+
+# 存档时每个角色只保留 player_memory;主观记忆队列已从模型移除,序列化时丢弃。
+_KEPT_CHARACTER_MEMORY_KEYS = ("player_memory",)
 
 
 def _clamp_relationship(value: float, tuning: RelationshipTuning) -> float:
@@ -71,3 +77,40 @@ class MemoryStore:
                 "key_events": key_events[-limit:],
             },
         }
+
+    def serialize_memory(self, state: dict) -> dict:
+        raw_memory = state.get("memory") or {}
+        memory_fragment = {key: deepcopy(raw_memory[key]) for key in raw_memory}
+        character_memory: dict = {}
+        for character_id, character in (state.get("characters") or {}).items():
+            if not isinstance(character, dict):
+                continue
+            char_mem = character.get("memory")
+            if not isinstance(char_mem, dict):
+                continue
+            kept = {
+                key: deepcopy(char_mem[key])
+                for key in _KEPT_CHARACTER_MEMORY_KEYS
+                if key in char_mem
+            }
+            if kept:
+                character_memory[character_id] = kept
+        return {"memory": memory_fragment, "character_memory": character_memory}
+
+    def deserialize_memory(self, fragment: dict | None) -> dict:
+        fragment = fragment or {}
+        base = empty_memory_state()
+        raw_memory = fragment.get("memory") or {}
+        memory = {**base, **{key: deepcopy(raw_memory[key]) for key in raw_memory if key in base}}
+        character_memory: dict = {}
+        for character_id, kept in (fragment.get("character_memory") or {}).items():
+            if not isinstance(kept, dict):
+                continue
+            normalized = {
+                key: deepcopy(kept[key])
+                for key in _KEPT_CHARACTER_MEMORY_KEYS
+                if key in kept
+            }
+            if normalized:
+                character_memory[character_id] = normalized
+        return {"memory": memory, "character_memory": character_memory}
