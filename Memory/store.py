@@ -96,3 +96,21 @@ class MemoryStore:
             if kept:
                 character_memory[character_id] = kept
         return {"memory": memory_fragment, "character_memory": character_memory}
+
+    def deserialize_memory(self, fragment: dict | None) -> dict:
+        fragment = fragment or {}
+        base = empty_memory_state()
+        raw_memory = fragment.get("memory") or {}
+        memory = {**base, **{key: deepcopy(raw_memory[key]) for key in raw_memory if key in base}}
+        character_memory: dict = {}
+        for character_id, kept in (fragment.get("character_memory") or {}).items():
+            if not isinstance(kept, dict):
+                continue
+            normalized = {
+                key: deepcopy(kept[key])
+                for key in _KEPT_CHARACTER_MEMORY_KEYS
+                if key in kept
+            }
+            if normalized:
+                character_memory[character_id] = normalized
+        return {"memory": memory, "character_memory": character_memory}
