@@ -17,19 +17,11 @@ class BackpackItem(TypedDict):
     quantity: int
 
 
-AgentType = Literal["actor", "L2", "L1"]
-StoryLayer = Literal["player", "actor", "L2", "L1"]
+AgentType = Literal["actor", "L1"]
+StoryLayer = Literal["player", "actor", "L1"]
 CharacterStorageMode = Literal["player_bound_instance", "shared_template"]
 LayerPlotSignificance = Literal["core", "supporting", "replaceable"]
 LayerRelationshipDepth = Literal["deep", "functional", "unknown"]
-
-
-class L2AgentProfile(TypedDict):
-    core_drive: str
-    judgement_preference: list[str]
-    behavior_rule: list[str]
-    speech_style: list[str]
-    personality_tags: list[str]
 
 
 class L1AgentProfile(TypedDict):
@@ -75,7 +67,6 @@ class CharacterProfile(CharacterProfileBase, total=False):
     profile_source: str
     occupation: str
     backpack: list[BackpackItem]
-    l2_profile: L2AgentProfile
     l1_profile: L1AgentProfile
     layer_assignment: LayerAssignment
     memory_profile: CharacterMemoryConfig
@@ -147,14 +138,10 @@ def _normalize_relationship_depth(value: Any, *, fallback: LayerRelationshipDept
 
 def _resolve_agent_type(source: Mapping[str, Any]) -> AgentType:
     explicit = clean_text(source.get("agent_type", ""))
-    if explicit in {"actor", "L2", "L1"}:
+    if explicit in {"actor", "L1"}:
         return explicit  # type: ignore[return-value]
-    if isinstance(source.get("l1_profile"), Mapping):
-        return "L1"
-    if isinstance(source.get("l2_profile"), Mapping):
-        return "L2"
     if clean_text(source.get("profile_source", "")) == "actor_create_agent":
-        return "L2"
+        return "L1"
     return "actor"
 
 
@@ -165,7 +152,7 @@ def _resolve_story_layer(
     character_id: str,
 ) -> StoryLayer:
     explicit = clean_text(source.get("story_layer", ""))
-    if explicit in {"player", "actor", "L2", "L1"}:
+    if explicit in {"player", "actor", "L1"}:
         if explicit == "player":
             return "player"
         if explicit == "actor":
@@ -173,7 +160,7 @@ def _resolve_story_layer(
         return explicit  # type: ignore[return-value]
     if character_id == "player":
         return "player"
-    if agent_type in {"L1", "L2"}:
+    if agent_type == "L1":
         return agent_type  # type: ignore[return-value]
     return "actor"
 
@@ -218,48 +205,6 @@ def normalize_layer_assignment(
         "long_term_plot_significance": long_term_plot_significance,
         "can_promote_to_l1": can_promote_to_l1,
         "assignment_reason": assignment_reason,
-    }
-
-
-def normalize_l2_agent_profile(
-    value: Any,
-    *,
-    fallback_story_role: str = "",
-    fallback_persona: list[str] | None = None,
-    fallback_style: str = "",
-) -> L2AgentProfile:
-    source = value if isinstance(value, Mapping) else {}
-    fallback_persona = list(fallback_persona or [])
-    personality_tags = _bounded_clean_str_list(
-        source.get("personality_tags", fallback_persona),
-        limit=4,
-    ) or fallback_persona[:2] or ["谨慎", "务实"]
-    judgement_preference = _bounded_clean_str_list(
-        source.get("judgement_preference", []),
-        limit=2,
-    ) or personality_tags[:1] or ["先看局势"]
-    behavior_rule = _bounded_clean_str_list(
-        source.get("behavior_rule", []),
-        limit=2,
-    ) or ["优先自保", "再考虑如何支撑局势"]
-    speech_style = _bounded_clean_str_list(
-        source.get("speech_style", []),
-        limit=2,
-    )
-    if not speech_style:
-        fallback_speech_style = clean_text(fallback_style)
-        speech_style = [fallback_speech_style] if fallback_speech_style else ["简洁克制"]
-
-    core_drive = clean_text(source.get("core_drive", ""))
-    if not core_drive:
-        core_drive = f"围绕“{fallback_story_role}”维持自己在局中的位置" if fallback_story_role else "先稳住自己在局中的位置"
-
-    return {
-        "core_drive": core_drive,
-        "judgement_preference": judgement_preference,
-        "behavior_rule": behavior_rule,
-        "speech_style": speech_style,
-        "personality_tags": personality_tags,
     }
 
 
@@ -390,21 +335,6 @@ def ensure_character_profile(
         agent_type=resolved_agent_type,
     )
 
-    if resolved_agent_type == "L2":
-        normalized["l2_profile"] = normalize_l2_agent_profile(
-            source.get("l2_profile", {}),
-            fallback_story_role=resolved_story_role,
-            fallback_persona=resolved_persona,
-            fallback_style=resolved_base_style,
-        )
-    elif "l2_profile" in source:
-        normalized["l2_profile"] = normalize_l2_agent_profile(
-            source.get("l2_profile", {}),
-            fallback_story_role=resolved_story_role,
-            fallback_persona=resolved_persona,
-            fallback_style=resolved_base_style,
-        )
-
     if resolved_agent_type == "L1" or "l1_profile" in source:
         normalized["l1_profile"] = normalize_l1_agent_profile(
             source.get("l1_profile", {}),
@@ -431,34 +361,3 @@ def ensure_character_profiles(
         )
     return normalized
 
-
-def promote_character_profile_to_l1(
-    profile: Mapping[str, Any] | None,
-    *,
-    character_id: str = "",
-    assignment_reason: str = "",
-) -> CharacterProfile:
-    source = dict(profile or {})
-    existing_assignment = source.get("layer_assignment", {})
-    source["agent_type"] = "L1"
-    source["layer_assignment"] = {
-        **(existing_assignment if isinstance(existing_assignment, Mapping) else {}),
-        "plot_significance": "core",
-        "relationship_depth": "deep",
-        "long_term_plot_significance": True,
-        "can_promote_to_l1": False,
-        "assignment_reason": clean_text(
-            assignment_reason,
-            clean_text(
-                (existing_assignment or {}).get("assignment_reason", "")
-                if isinstance(existing_assignment, Mapping)
-                else "",
-                "promoted_to_l1",
-            ),
-        ),
-    }
-    return ensure_character_profile(
-        source,
-        character_id=character_id or clean_text(source.get("character_id", "")),
-        include_backpack="backpack" in source,
-    )
