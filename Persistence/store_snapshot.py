@@ -12,6 +12,9 @@ from Persistence.Models import (
     UserAccount,
 )
 from Persistence.store_common import clean_text, clone_json, dedupe_character_ids, serialize_dt, serialize_numeric
+from Memory.store import MemoryStore
+
+_MEMORY_STORE = MemoryStore()
 
 
 def require_snapshot_value(snapshot: dict[str, Any], key: str, expected_type: type) -> Any:
@@ -48,19 +51,40 @@ def build_player_attributes(snapshot: dict[str, Any]) -> dict[str, Any]:
     return clone_json(attributes)
 
 
+def _merge_character_memory(
+    characters: dict[str, Any], character_memory: dict[str, Any]
+) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for character_id, character in characters.items():
+        if not isinstance(character, dict):
+            result[character_id] = character
+            continue
+        merged = {key: value for key, value in character.items() if key != "memory"}
+        kept = character_memory.get(character_id)
+        if kept:
+            merged["memory"] = kept
+        result[character_id] = merged
+    return result
+
+
 def build_world_state_payload(snapshot: dict[str, Any]) -> dict[str, Any]:
     state = require_snapshot_value(snapshot, "state", dict)
-    return {key: clone_json(state.get(key, default)) for key, default in (
+    memory_fragment = _MEMORY_STORE.deserialize_memory(_MEMORY_STORE.serialize_memory(state))
+    payload = {key: clone_json(state.get(key, default)) for key, default in (
         ("plot", {}),
         ("scene", {}),
         ("runtime", {}),
         ("scene_plan", {}),
         ("director_brief", {}),
-        ("memory", {}),
         ("history", []),
-        ("characters", {}),
         ("player", {}),
     )}
+    payload["memory"] = memory_fragment["memory"]
+    payload["characters"] = _merge_character_memory(
+        clone_json(state.get("characters", {})),
+        memory_fragment["character_memory"],
+    )
+    return payload
 
 
 def build_plot_flags_payload(snapshot: dict[str, Any]) -> dict[str, Any]:

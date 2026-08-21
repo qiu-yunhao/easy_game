@@ -1,4 +1,5 @@
 from Memory.store import MemoryStore
+from Persistence.store_snapshot import build_world_state_payload
 
 
 def _state_with_memory():
@@ -114,3 +115,34 @@ def test_serialize_deserialize_round_trip_is_stable():
             "key_events": [{"impression": "helped me"}],
         }
     }
+
+
+def test_world_state_payload_strips_stale_character_queues():
+    snapshot = {
+        "state": {
+            "plot": {}, "scene": {}, "runtime": {}, "scene_plan": {},
+            "director_brief": {}, "history": [], "player": {},
+            "memory": {"last_compressed_turn": 4},
+            "characters": {
+                "lin": {
+                    "id": "lin",
+                    "emotion": "calm",
+                    "memory": {
+                        "player_memory": {"overall_impression": "ally"},
+                        "short_term_memory": [{"summary": "stale"}],
+                    },
+                }
+            },
+        }
+    }
+    payload = build_world_state_payload(snapshot)
+
+    # non-memory keys unchanged
+    assert payload["plot"] == {}
+    assert payload["history"] == []
+    # character retains identity + runtime, but subjective queue is gone
+    assert payload["characters"]["lin"]["emotion"] == "calm"
+    assert payload["characters"]["lin"]["memory"] == {"player_memory": {"overall_impression": "ally"}}
+    # global memory backfilled to full shape
+    assert payload["memory"]["last_compressed_turn"] == 4
+    assert "scene_memory" in payload["memory"]
