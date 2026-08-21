@@ -8,6 +8,8 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from db import Database, DatabaseConfig
 
+from Memory.store import MemoryStore
+
 from Persistence.Models import (
     Base,
     PlayerActorInteraction,
@@ -20,6 +22,7 @@ from Persistence.Models import (
 )
 from Persistence.store_common import SNAPSHOT_VERSION, clean_text, clone_json, utc_now
 from Persistence.store_snapshot import (
+    _merge_character_memory,
     player_character_id_from_snapshot,
     serialize_actor_interaction,
     serialize_player,
@@ -53,6 +56,22 @@ from StoryStateUtils import (
 class SaveStoreConfig:
     database_url: str
     echo: bool = False
+
+
+_MEMORY_STORE = MemoryStore()
+
+
+def normalize_loaded_state(state: dict) -> dict:
+    if not isinstance(state, dict):
+        return state
+    fragment = _MEMORY_STORE.deserialize_memory(_MEMORY_STORE.serialize_memory(state))
+    normalized = dict(state)
+    normalized["memory"] = fragment["memory"]
+    normalized["characters"] = _merge_character_memory(
+        dict(state.get("characters", {})),
+        fragment["character_memory"],
+    )
+    return normalized
 
 
 class GameSaveStore:
@@ -244,7 +263,7 @@ class GameSaveStore:
                     key: clone_json(value)
                     for key, value in (
                         ("session", snapshot_row.session_config_json),
-                        ("state", snapshot_row.game_state_json),
+                        ("state", normalize_loaded_state(snapshot_row.game_state_json)),
                         ("character_profiles", snapshot_row.character_profiles_json),
                         ("scene_config", snapshot_row.scene_config_json),
                     )
