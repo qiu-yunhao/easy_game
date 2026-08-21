@@ -62,6 +62,8 @@ _MEMORY_STORE = MemoryStore()
 
 
 def normalize_loaded_state(state: dict) -> dict:
+    # memory 部分经 deserialize 深拷贝、与源解耦;非 memory 键仅浅拷贝,与源共享嵌套引用。
+    # 唯一生产调用方(load_player_session)会对结果再 clone_json,故不会回写污染源 state。
     if not isinstance(state, dict):
         return state
     fragment = _MEMORY_STORE.deserialize_memory(_MEMORY_STORE.serialize_memory(state))
