@@ -27,7 +27,7 @@ def _state(history_len: int = 0, *, on_stage=None, pending=None):
             "beat_fallback_turns_remaining": 0,
         },
         "scene": {"on_stage": list(on_stage or [])},
-        "player": {"enabled": False, "controlled_character": None},
+        "player": {"enabled": False, "controlled_character": None, "auto_mode": False},
         "history": [{"turn": i, "content": f"seed-{i}"} for i in range(history_len)],
     }
 
