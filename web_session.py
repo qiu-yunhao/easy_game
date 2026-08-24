@@ -876,6 +876,7 @@ class WebGameSession:
             "player": {
                 "enabled": player_state.get("enabled", False),
                 "controlled_character": player_character,
+                "auto_mode": player_state.get("auto_mode", False),
                 "last_input": player_state.get("last_input", ""),
                 "last_parsed_act": latest_parsed_act,
             },

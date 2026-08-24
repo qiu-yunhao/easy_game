@@ -141,6 +141,7 @@ class RuntimeState(TypedDict):
 class PlayerState(TypedDict):
     enabled: bool
     controlled_character: Optional[str]
+    auto_mode: bool
     last_input: str
     last_parsed_act: Optional[ResolvedAct]
 
@@ -200,12 +201,14 @@ def create_player_state(
     *,
     controlled_character: str | None = None,
     enabled: bool | None = None,
+    auto_mode: bool = False,
     last_input: str = "",
     last_parsed_act: ResolvedAct | None = None,
 ) -> PlayerState:
     return {
         "enabled": bool(controlled_character) if enabled is None else enabled,
         "controlled_character": controlled_character,
+        "auto_mode": auto_mode,
         "last_input": last_input,
         "last_parsed_act": last_parsed_act,
     }
