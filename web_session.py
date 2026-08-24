@@ -414,16 +414,10 @@ class WebGameSession:
     def _export_runtime_snapshot_unlocked(self) -> dict[str, Any]:
         state = _json_clone(self.state)
         profiles = _json_clone(_profiles_as_dict(self.character_profiles))
-        if self.auto_mode:
-            # 存档只落地正常游玩态:自动模式是临时叠加,导出时把玩家角色还原为升格前的
-            # agent_type 与 enabled=True,避免存档带着"L1 化玩家 + enabled=False"的半自动态。
-            player_id = self.config.player_character
-            restored = self._player_saved_agent_type or "actor"
-            player_profile = profiles.get(player_id)
-            if isinstance(player_profile, dict):
-                player_profile["agent_type"] = restored
-            if isinstance(state.get("player"), dict):
-                state["player"]["enabled"] = True
+        if self.auto_mode and isinstance(state.get("player"), dict):
+            # 存档只落地正常游玩态:把临时自动叠加还原为手动态。档案未被篡改,无需还原 agent_type。
+            state["player"]["enabled"] = True
+            state["player"]["auto_mode"] = False
         return {
             "session": {
                 "mode": self.config.mode,
@@ -685,8 +679,12 @@ class WebGameSession:
     def _reset_auto_mode_flags_unlocked(self) -> None:
         # 会话被重建/换档时清掉自动模式的临时叠加态,避免脏标志残留到全新/载入的状态上。
         self.auto_mode = False
-        self._player_saved_agent_type = None
         self._last_chapter_advanced = False
+        if isinstance(self.state.get("player"), dict):
+            self.state = {
+                **self.state,
+                "player": {**self.state["player"], "auto_mode": False},
+            }
 
     def _rebuild_session(self, *, initialize_story: bool = False) -> None:
         self.character_profiles = build_default_character_profiles(self.config.player_profile)
