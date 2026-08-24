@@ -276,6 +276,74 @@ class BeatResolutionTests(unittest.TestCase):
 
         self.assertEqual(next_state["runtime"]["resolved_act"]["spoken_text"], "l1:npc_a")
 
+    def test_actor_node_dispatches_player_to_l1_when_auto_mode(self) -> None:
+        # 玩家在自动模式下:即便档案 agent_type=actor,也应由 l1_actor_agent 演绎。
+        state = _build_state(
+            on_stage=["player"],
+            focus_character="player",
+            player_character="player",
+        )
+        state["player"]["enabled"] = False
+        state["player"]["auto_mode"] = True
+        state["runtime"]["next_act"] = {
+            "actor": "player",
+            "mode": "speak",
+            "target": None,
+            "motivation": "",
+            "content": "",
+        }
+        profiles = _build_profiles(["player"])
+        profiles["player"]["agent_type"] = "actor"  # 故意非 L1
+        self.assertEqual(profiles["player"].get("agent_type"), "actor")
+        deps = GraphDependencies(
+            scene_config={
+                "scene_id": "scene-1",
+                "default_location_id": "room",
+                "default_on_stage": ["player"],
+            },
+            character_profiles=profiles,
+            actor_memory_provider=DefaultActorMemoryProvider(character_profiles=profiles),
+            actor_agent=FakeTierActor("default"),
+            l1_actor_agent=FakeTierActor("l1"),
+            component_factory=ComponentFactory(),
+        )
+        register_default_hooks(deps)
+        next_state = actor_node(state, deps)
+        self.assertEqual(next_state["runtime"]["resolved_act"]["spoken_text"], "l1:player")
+        self.assertEqual(profiles["player"].get("agent_type"), "actor")  # 档案未被篡改
+
+    def test_actor_node_non_player_ignores_auto_mode_flag(self) -> None:
+        # auto_mode 为真,但当前 actor 不是玩家 → 仍按其档案 agent_type 走普通 agent。
+        state = _build_state(
+            on_stage=["npc_a"],
+            focus_character="npc_a",
+            player_character="player",
+        )
+        state["player"]["auto_mode"] = True
+        state["runtime"]["next_act"] = {
+            "actor": "npc_a",
+            "mode": "speak",
+            "target": None,
+            "motivation": "",
+            "content": "",
+        }
+        profiles = _build_profiles(["player", "npc_a"])
+        deps = GraphDependencies(
+            scene_config={
+                "scene_id": "scene-1",
+                "default_location_id": "room",
+                "default_on_stage": ["npc_a"],
+            },
+            character_profiles=profiles,
+            actor_memory_provider=DefaultActorMemoryProvider(character_profiles=profiles),
+            actor_agent=FakeTierActor("default"),
+            l1_actor_agent=FakeTierActor("l1"),
+            component_factory=ComponentFactory(),
+        )
+        register_default_hooks(deps)
+        next_state = actor_node(state, deps)
+        self.assertEqual(next_state["runtime"]["resolved_act"]["spoken_text"], "default:npc_a")
+
     def test_actor_node_keeps_default_actor_agent_for_plain_actor_profiles(self) -> None:
         state = _build_state(
             on_stage=["npc_a"],

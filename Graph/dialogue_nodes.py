@@ -101,7 +101,7 @@ def beat_resolution_node(
         successes, failures = run_actor_group(
             current,
             group=group,
-            resolve_agent=lambda actor_id: _resolve_agent_for_actor(deps, actor_id),
+            resolve_agent=lambda actor_id: _resolve_agent_for_actor(deps, actor_id, current),
             provider=deps.actor_memory_provider,
         )
         applied = apply_group_results(
@@ -130,7 +130,17 @@ def beat_resolution_node(
 def _resolve_agent_for_actor(
     deps: GraphDependencies,
     actor_id: str,
+    state: GameState,
 ) -> ActorAgent | None:
+    player = state["player"]
+    if player.get("auto_mode", False) and actor_id == player.get("controlled_character"):
+        # 玩家在自动模式下由 L1 agent 演绎;不读也不改 character_profiles.agent_type。
+        return _resolve_component(
+            deps,
+            "l1_actor_agent",
+            "build_l1_actor_agent",
+            required_name="an L1ActorAgent",
+        )
     actor_profile = deps.character_profiles.get(actor_id, {})
     agent_type = _clean_text(actor_profile.get("agent_type", ""), "actor")
     if agent_type == "L1":
@@ -157,7 +167,7 @@ def actor_node(state: GameState, deps: GraphDependencies) -> GameState:
 
     planned_act = state["runtime"].get("next_act") or {}
     actor_id = str(planned_act.get("actor", "") or "").strip()
-    selected_actor_agent = _resolve_agent_for_actor(deps, actor_id)
+    selected_actor_agent = _resolve_agent_for_actor(deps, actor_id, state)
 
     return resolve_npc_turn_state(
         state,
