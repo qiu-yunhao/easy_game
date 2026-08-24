@@ -205,7 +205,6 @@ class WebGameSession:
         self.last_handoff_reason = "请先确认玩家档案，然后初始化当前场景。"
         self.story_initialized = False
         self.auto_mode = False
-        self._player_saved_agent_type: str | None = None
         self._last_chapter_advanced = False
         self.character_profiles: dict[str, dict[str, Any]] = {}
         self.scene_config: dict[str, Any] = {}
@@ -485,28 +484,18 @@ class WebGameSession:
             return self.serialize_state()
 
     def _enable_auto_unlocked(self) -> None:
-        # 玩家角色升格 L1:存原 agent_type,改 profile.agent_type=L1(使调度选 l1_actor_agent),
-        # 关掉 player.enabled 让玩家回合自动流向 actor 调度。
-        player_id = self.config.player_character
-        profile = self.deps.character_profiles.get(player_id, {})
-        self._player_saved_agent_type = str(profile.get("agent_type", "actor") or "actor")
-        self.deps.character_profiles.update_field(player_id, "agent_type", "L1")
+        # 玩家回合改由 L1 agent 演绎:只设运行时标志,不篡改共享档案 character_profiles。
         self.state = {
             **self.state,
-            "player": {**self.state["player"], "enabled": False},
+            "player": {**self.state["player"], "enabled": False, "auto_mode": True},
         }
         self.auto_mode = True
-        self.last_handoff_reason = "自动模式已开启：玩家角色临时升格为核心角色自动演绎。"
+        self.last_handoff_reason = "自动模式已开启：玩家角色由核心角色 agent 自动演绎。"
 
     def _disable_auto_unlocked(self) -> None:
-        # 还原玩家 agent_type 与 enabled;下一个玩家回合 is_player_turn 恢复 True,重新等输入。
-        player_id = self.config.player_character
-        restored = self._player_saved_agent_type or "actor"
-        self.deps.character_profiles.update_field(player_id, "agent_type", restored)
-        self._player_saved_agent_type = None
         self.state = {
             **self.state,
-            "player": {**self.state["player"], "enabled": True},
+            "player": {**self.state["player"], "enabled": True, "auto_mode": False},
         }
         self.auto_mode = False
         self.last_handoff_reason = "自动模式已关闭：下一个玩家回合恢复等待输入。"
