@@ -479,6 +479,7 @@ class WebGameSession:
 
     def _enable_auto_unlocked(self) -> None:
         # 玩家回合改由 L1 agent 演绎:只设运行时标志,不篡改共享档案 character_profiles。
+        # enabled=False 让玩家回合流入 actor 调度分支;auto_mode=True 让该分支选 L1。二者缺一不可。
         self.state = {
             **self.state,
             "player": {**self.state["player"], "enabled": False, "auto_mode": True},
