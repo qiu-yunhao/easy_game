@@ -3,7 +3,10 @@ from WorldSetting.applier import apply_world_setting
 from WorldSetting.schema import (
     ADVANCE_CONDITION_TYPES,
     AdvanceCondition,
+    CharacterSeed,
+    FactionGeography,
     ProgressionSystem,
+    TemplateRef,
     Tier,
     WorldSetting,
     build_advance_condition,
@@ -16,7 +19,10 @@ from WorldSetting.xianxia_preset import build_xianxia_world_setting
 __all__ = [
     "ADVANCE_CONDITION_TYPES",
     "AdvanceCondition",
+    "CharacterSeed",
+    "FactionGeography",
     "ProgressionSystem",
+    "TemplateRef",
     "Tier",
     "WorldSetting",
     "WorldSettingError",

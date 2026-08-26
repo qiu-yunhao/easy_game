@@ -50,6 +50,10 @@ def apply_world_setting(world_setting: WorldSetting) -> dict[str, Any]:
         "opening_kwargs": {
             "location_id": opening_location,
             "cultivation_goal": world_setting.get("core_drive", ""),
+            # 注意:这里的 realm 是通用阶梯的 tier 名(如 xianxia preset 的"炼气"),
+            # 与现有 Cultivation 数值链路用的子境界全名("练气一层")不是同一格式。
+            # 阶段2 默认路径仍走 player_context 的全名,未消费这三个字段;将来若要接入
+            # 数值链路,必须先把 tier 名映射回 Cultivation 的 realm 全名,否则会静默断链。
             "current_player_realm": current_tier["name"],
             "current_chapter_realm": current_tier["name"],
             "next_chapter_realm": next_tier["name"],
