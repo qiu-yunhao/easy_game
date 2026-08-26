@@ -35,11 +35,11 @@ export function renderTemplates(el) {
       const { templates } = await api.listTemplates();
       grid.innerHTML = (templates || []).length
         ? templates
-            .map((t) => `<button class="tpl-card" data-id="${t.template_id}"><b>${escapeHtml(t.source_title)}</b><br><small>${escapeHtml(String(t.beat_count))} 情节节点</small></button>`)
+            .map((t) => `<button class="tpl-card" data-id="${t.template_id}" data-title="${escapeHtml(t.source_title)}"><b>${escapeHtml(t.source_title)}</b><br><small>${escapeHtml(String(t.beat_count))} 情节节点</small></button>`)
             .join("")
         : `<div class="placeholder">还没有模板，先上传一部小说解析。</div>`;
       grid.querySelectorAll(".tpl-card").forEach((c) =>
-        c.addEventListener("click", () => openTemplateDetail(Number(c.dataset.id))));
+        c.addEventListener("click", () => openTemplateDetail(Number(c.dataset.id), c.dataset.title)));
     } catch (error) {
       grid.innerHTML = `<div class="placeholder">加载失败：${escapeHtml(error.message)}</div>`;
     }
