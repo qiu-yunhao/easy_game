@@ -1,4 +1,5 @@
 from WorldSetting.advancement import can_advance
+from WorldSetting.applier import apply_world_setting
 from WorldSetting.schema import (
     ADVANCE_CONDITION_TYPES,
     AdvanceCondition,
@@ -19,6 +20,7 @@ __all__ = [
     "Tier",
     "WorldSetting",
     "WorldSettingError",
+    "apply_world_setting",
     "build_advance_condition",
     "build_empty_world_setting",
     "build_tier",
