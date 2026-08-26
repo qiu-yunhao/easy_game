@@ -53,4 +53,4 @@ class DefaultStateRegressionTests(unittest.TestCase):
         self.assertEqual(state["scene"]["location_id"], "云峰入门台")
         self.assertEqual(state["scene"]["beat"], "初入仙门")
         self.assertEqual(state["plot"]["current_player_realm"], "练气一层")
-        self.assertIn("修仙", state["plot"]["cultivation_goal"])
+        self.assertEqual(state["plot"]["cultivation_goal"], build_xianxia_world_setting()["core_drive"])
