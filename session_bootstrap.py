@@ -39,6 +39,7 @@ from Narrator.NarrationPresets import (
 )
 from PlayerControl import ConsolePlayerInterface
 from StoryStateUtils import clean_str_list, clean_text
+from WorldSetting import apply_world_setting, build_xianxia_world_setting
 
 
 PLAYER_CHARACTER_ID = "player"
@@ -340,7 +341,10 @@ def build_default_state(
     profiles = ensure_character_profiles(character_profiles or build_default_character_profiles(), player_character_id=PLAYER_CHARACTER_ID)
     player_profile = profiles[PLAYER_CHARACTER_ID]
     player_context = build_opening_player_context(player_profile)
-
+    world_setting = build_xianxia_world_setting()
+    applied = apply_world_setting(world_setting)
+    # 默认(xianxia)路径:realm 仍走原 player_context 以保数值链路等价;
+    # 设定包接管 core_drive(cultivation_goal)。location/beat 保留原开场字面量。
     return build_opening_state(
         player_character=player_character,
         chapter_id="opening-arc-1",
@@ -348,7 +352,7 @@ def build_default_state(
         location_id="云峰入门台",
         time_tag="清晨",
         beat="初入仙门",
-        cultivation_goal="先在修仙世界立足，摸清自身天赋与可行道路。",
+        cultivation_goal=applied["opening_kwargs"]["cultivation_goal"],
         current_player_realm=player_context["realm"],
         current_chapter_realm=player_context["current_realm_stage"],
         next_chapter_realm=player_context["next_realm_stage"],
