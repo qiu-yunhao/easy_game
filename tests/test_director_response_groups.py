@@ -149,6 +149,57 @@ class InterruptSplitsGroupsTest(unittest.TestCase):
         self.assertEqual(sorted(flat), ["a", "b", "c"])
 
 
+class PlayerRespondsToSelfSafetyNetTest(unittest.TestCase):
+    def _brief(self, who_should_respond):
+        return {
+            "beat": "b", "beat_goal": "g",
+            "focus_character": None,
+            "tension_target": 0.3,
+            "allow_interrupt": False,
+            "who_should_respond": who_should_respond,
+            "lead_in_text": "", "wrap_up_text": "",
+            "stage_actions": {"enter": [], "leave": [], "suppress": [], "unsuppress": []},
+            "notes": [],
+        }
+
+    def test_player_only_queue_falls_back_to_onstage_npcs(self):
+        result = normalize_director_brief(
+            self._brief(["player"]),
+            current_on_stage=["player", "npc_a", "npc_b"],
+            allowed_actor_ids=["player", "npc_a", "npc_b"],
+            player_character_id="player",
+        )
+        self.assertNotIn("player", result["who_should_respond"])
+        self.assertEqual(sorted(result["who_should_respond"]), ["npc_a", "npc_b"])
+
+    def test_empty_queue_falls_back_to_npcs_excluding_player(self):
+        result = normalize_director_brief(
+            self._brief([]),
+            current_on_stage=["player", "npc_a"],
+            allowed_actor_ids=["player", "npc_a"],
+            player_character_id="player",
+        )
+        self.assertEqual(result["who_should_respond"], ["npc_a"])
+
+    def test_mixed_queue_with_player_is_left_intact(self):
+        result = normalize_director_brief(
+            self._brief(["npc_a", "player", "npc_b"]),
+            current_on_stage=["player", "npc_a", "npc_b"],
+            allowed_actor_ids=["player", "npc_a", "npc_b"],
+            player_character_id="player",
+        )
+        self.assertEqual(result["who_should_respond"], ["npc_a", "player", "npc_b"])
+
+    def test_player_only_on_stage_keeps_player(self):
+        result = normalize_director_brief(
+            self._brief(["player"]),
+            current_on_stage=["player"],
+            allowed_actor_ids=["player"],
+            player_character_id="player",
+        )
+        self.assertEqual(result["who_should_respond"], ["player"])
+
+
 class ApplyBriefGroupsTest(unittest.TestCase):
     def test_apply_populates_pending_response_groups(self):
         state = _build_group_state(["a", "b", "c"])

@@ -365,6 +365,7 @@ def normalize_director_brief(
     *,
     allowed_actor_ids: list[str] | None = None,
     character_profiles: Mapping[str, Mapping[str, Any]] | None = None,
+    player_character_id: str | None = None,
 ) -> DirectorBrief:
     normalized = empty_director_brief()
     if not brief:
@@ -395,14 +396,32 @@ def normalize_director_brief(
     )
     normalized["tension_target"] = clamp_float(brief.get("tension_target", 0.0))
     normalized["allow_interrupt"] = bool(brief.get("allow_interrupt", False))
-    normalized["who_should_respond"] = [
+    player_id = str(player_character_id or "").strip() or None
+    non_player_on_stage = [
+        cid for cid in future_on_stage if player_id is None or cid != player_id
+    ]
+    requested_respond = [
         str(cid)
         for cid in brief.get("who_should_respond", [])
         if cid in future_on_stage
     ]
+    # The player just acted. If the director only queued the player (or queued
+    # nobody) while other characters are on stage, they never react and the beat
+    # loop re-queues the player against themselves. Fall back to the on-stage
+    # NPCs so the scene actually answers. A mixed queue that the director chose
+    # deliberately (e.g. scripted turn-taking) is left intact.
+    only_player_requested = (
+        player_id is not None
+        and requested_respond
+        and all(cid == player_id for cid in requested_respond)
+    )
+    if only_player_requested and non_player_on_stage:
+        requested_respond = []
+    normalized["who_should_respond"] = requested_respond
     if not normalized["who_should_respond"]:
+        fallback_pool = non_player_on_stage if non_player_on_stage else future_on_stage
         normalized["who_should_respond"] = _prioritize_active_actors(
-            future_on_stage,
+            fallback_pool,
             focus_character=normalized["focus_character"],
             tension_target=normalized["tension_target"],
             character_profiles=character_profiles,
@@ -467,6 +486,7 @@ def apply_director_brief(
         state["scene"]["on_stage"],
         allowed_actor_ids=allowed_actor_ids,
         character_profiles=character_profiles,
+        player_character_id=state["player"].get("controlled_character"),
     )
     normalized = _ensure_conflict_triptych(
         state,
