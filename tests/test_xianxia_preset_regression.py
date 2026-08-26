@@ -1,0 +1,31 @@
+from __future__ import annotations
+
+import unittest
+
+from Cultivation.realms import REALM_ORDER
+from WorldSetting.validation import validate_world_setting
+from WorldSetting.xianxia_preset import build_xianxia_world_setting
+
+
+class XianxiaPresetTests(unittest.TestCase):
+    def test_preset_is_valid(self) -> None:
+        validate_world_setting(build_xianxia_world_setting())
+
+    def test_preset_tiers_follow_realm_order(self) -> None:
+        ws = build_xianxia_world_setting()
+        tier_names = [t["name"] for t in ws["progression"]["tiers"]]
+        self.assertEqual(tier_names, list(REALM_ORDER))
+
+    def test_preset_metadata(self) -> None:
+        ws = build_xianxia_world_setting()
+        self.assertEqual(ws["genre_tag"], "xianxia")
+        self.assertEqual(ws["source"], "preset")
+        self.assertIn("长生", ws["core_drive"])
+        self.assertEqual(ws["progression"]["current_tier_index"], 0)
+
+    def test_each_tier_has_event_condition_except_last(self) -> None:
+        ws = build_xianxia_world_setting()
+        tiers = ws["progression"]["tiers"]
+        for tier in tiers[:-1]:
+            self.assertEqual(tier["advance_condition"]["type"], "event")
+        self.assertEqual(tiers[-1]["advance_condition"]["type"], "narrative")

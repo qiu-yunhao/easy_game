@@ -10,6 +10,7 @@ from WorldSetting.schema import (
     build_tier,
 )
 from WorldSetting.validation import WorldSettingError, validate_world_setting
+from WorldSetting.xianxia_preset import build_xianxia_world_setting
 
 __all__ = [
     "ADVANCE_CONDITION_TYPES",
@@ -21,6 +22,7 @@ __all__ = [
     "build_advance_condition",
     "build_empty_world_setting",
     "build_tier",
+    "build_xianxia_world_setting",
     "can_advance",
     "validate_world_setting",
 ]
