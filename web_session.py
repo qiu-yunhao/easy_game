@@ -205,7 +205,6 @@ class WebGameSession:
         self.last_handoff_reason = "请先确认玩家档案，然后初始化当前场景。"
         self.story_initialized = False
         self.auto_mode = False
-        self._player_saved_agent_type: str | None = None
         self._last_chapter_advanced = False
         self.character_profiles: dict[str, dict[str, Any]] = {}
         self.scene_config: dict[str, Any] = {}
@@ -415,16 +414,10 @@ class WebGameSession:
     def _export_runtime_snapshot_unlocked(self) -> dict[str, Any]:
         state = _json_clone(self.state)
         profiles = _json_clone(_profiles_as_dict(self.character_profiles))
-        if self.auto_mode:
-            # 存档只落地正常游玩态:自动模式是临时叠加,导出时把玩家角色还原为升格前的
-            # agent_type 与 enabled=True,避免存档带着"L1 化玩家 + enabled=False"的半自动态。
-            player_id = self.config.player_character
-            restored = self._player_saved_agent_type or "actor"
-            player_profile = profiles.get(player_id)
-            if isinstance(player_profile, dict):
-                player_profile["agent_type"] = restored
-            if isinstance(state.get("player"), dict):
-                state["player"]["enabled"] = True
+        if self.auto_mode and isinstance(state.get("player"), dict):
+            # 存档只落地正常游玩态:把临时自动叠加还原为手动态。档案未被篡改,无需还原 agent_type。
+            state["player"]["enabled"] = True
+            state["player"]["auto_mode"] = False
         return {
             "session": {
                 "mode": self.config.mode,
@@ -485,28 +478,19 @@ class WebGameSession:
             return self.serialize_state()
 
     def _enable_auto_unlocked(self) -> None:
-        # 玩家角色升格 L1:存原 agent_type,改 profile.agent_type=L1(使调度选 l1_actor_agent),
-        # 关掉 player.enabled 让玩家回合自动流向 actor 调度。
-        player_id = self.config.player_character
-        profile = self.deps.character_profiles.get(player_id, {})
-        self._player_saved_agent_type = str(profile.get("agent_type", "actor") or "actor")
-        self.deps.character_profiles.update_field(player_id, "agent_type", "L1")
+        # 玩家回合改由 L1 agent 演绎:只设运行时标志,不篡改共享档案 character_profiles。
+        # enabled=False 让玩家回合流入 actor 调度分支;auto_mode=True 让该分支选 L1。二者缺一不可。
         self.state = {
             **self.state,
-            "player": {**self.state["player"], "enabled": False},
+            "player": {**self.state["player"], "enabled": False, "auto_mode": True},
         }
         self.auto_mode = True
-        self.last_handoff_reason = "自动模式已开启：玩家角色临时升格为核心角色自动演绎。"
+        self.last_handoff_reason = "自动模式已开启：玩家角色由核心角色 agent 自动演绎。"
 
     def _disable_auto_unlocked(self) -> None:
-        # 还原玩家 agent_type 与 enabled;下一个玩家回合 is_player_turn 恢复 True,重新等输入。
-        player_id = self.config.player_character
-        restored = self._player_saved_agent_type or "actor"
-        self.deps.character_profiles.update_field(player_id, "agent_type", restored)
-        self._player_saved_agent_type = None
         self.state = {
             **self.state,
-            "player": {**self.state["player"], "enabled": True},
+            "player": {**self.state["player"], "enabled": True, "auto_mode": False},
         }
         self.auto_mode = False
         self.last_handoff_reason = "自动模式已关闭：下一个玩家回合恢复等待输入。"
@@ -696,8 +680,12 @@ class WebGameSession:
     def _reset_auto_mode_flags_unlocked(self) -> None:
         # 会话被重建/换档时清掉自动模式的临时叠加态,避免脏标志残留到全新/载入的状态上。
         self.auto_mode = False
-        self._player_saved_agent_type = None
         self._last_chapter_advanced = False
+        if isinstance(self.state.get("player"), dict):
+            self.state = {
+                **self.state,
+                "player": {**self.state["player"], "auto_mode": False},
+            }
 
     def _rebuild_session(self, *, initialize_story: bool = False) -> None:
         self.character_profiles = build_default_character_profiles(self.config.player_profile)
@@ -876,6 +864,7 @@ class WebGameSession:
             "player": {
                 "enabled": player_state.get("enabled", False),
                 "controlled_character": player_character,
+                "auto_mode": player_state.get("auto_mode", False),
                 "last_input": player_state.get("last_input", ""),
                 "last_parsed_act": latest_parsed_act,
             },

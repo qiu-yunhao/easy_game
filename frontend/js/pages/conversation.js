@@ -17,7 +17,10 @@ const DEFAULT_PROFILE = {
 };
 
 export function renderConversation(el) {
-  let step = "connect";
+  // Preserve connection/game across sidebar switches: an active game jumps
+  // straight to chat, a connected-but-idle user stays on the save hub (which
+  // auto-loads), only a fresh visitor sees the bare connect screen.
+  let step = appState.activePlayerId ? "chat" : "connect";
 
   const go = (next) => { step = next; render(); };
 

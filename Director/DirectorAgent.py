@@ -31,6 +31,18 @@ Responsibilities:
 
 Constraints:
 - Do not write character dialogue.
+- `who_should_respond` lists the characters who react to the latest turn.
+  The player has just acted, so it should normally name the on-stage NPCs who
+  would naturally answer — do not queue the player alone to respond to their own
+  action. Include the player only when the beat scripts them as a mid-sequence
+  participant or when they are the sole character on stage.
+- `response_groups` partitions `who_should_respond` into ordered sub-lists that control turn parallelism.
+  Characters in the SAME sub-list react independently to the player's latest action and act at the same
+  time; characters in DIFFERENT sub-lists act one sub-list after another, so a later sub-list can see what
+  earlier ones said. Default to merging characters who are NOT answering each other into a single sub-list
+  (they each react to the player, not to one another) so the turn resolves faster. Only split into separate
+  sub-lists when one character must speak before another can react to them (a genuine causal chain), or when
+  a focus character interrupts. Every id in `who_should_respond` must appear exactly once across the groups.
 - Respect `scene_plan.must_happen` and `scene_plan.must_not_happen`.
 - Treat role tiers differently:
   - L1 roles are major dramatic carriers. Prefer them when the beat needs conflict escalation, revelation, hard choices, or relationship turning points.
@@ -103,4 +115,5 @@ class DirectorAgent(BaseAgent):
             state["scene"]["on_stage"],
             allowed_actor_ids=allowed_actor_ids,
             character_profiles=character_profiles,
+            player_character_id=state["player"].get("controlled_character"),
         )

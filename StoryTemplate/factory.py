@@ -16,8 +16,10 @@ from StoryTemplate.TemplateRepository import TemplateRepository
 
 def build_story_template_service(
     *, mysql_url: str, pg_url: str, client: Any | None = None,
+    embedding: Any | None = None,
 ) -> StoryTemplateService:
-    embedding = BgeEmbeddingModel()
+    if embedding is None:
+        embedding = BgeEmbeddingModel()
     vector_store = PgVectorStore(pg_url)
     repository = TemplateRepository(Database(mysql_url))
     repository.create_all()
