@@ -75,7 +75,7 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def _setup_recall(session, *, save_database, recall_url: str) -> object | None:
+def _setup_recall(session, *, save_database, recall_url: str, embedding=None) -> object | None:
     """按需组装并绑定回忆栈到会话，返回已启动的索引器（未启用则 None）。
 
     触发条件：同时具备 save 库与非空 recall 连接串。用 DataAccess 收敛多库混排
@@ -89,7 +89,10 @@ def _setup_recall(session, *, save_database, recall_url: str) -> object | None:
     access = DataAccess(save_database=save_database, recall_url=recall_url)
     if not access.has_recall():
         return None
-    service, indexer = build_recall_stack(access)
+    factory_kwargs = {}
+    if embedding is not None:
+        factory_kwargs["embedding_factory"] = lambda: embedding
+    service, indexer = build_recall_stack(access, **factory_kwargs)
     if service is None or indexer is None:
         return None
     session.bind_recall_service(service)
@@ -98,11 +101,12 @@ def _setup_recall(session, *, save_database, recall_url: str) -> object | None:
     return indexer
 
 
-def _maybe_setup_story_template(session, *, mysql_url: str, pg_url: str) -> None:
+def _maybe_setup_story_template(session, *, mysql_url: str, pg_url: str, embedding=None) -> None:
     if not (str(mysql_url).strip() and str(pg_url).strip()):
         return
     service = build_story_template_service(
         mysql_url=str(mysql_url).strip(), pg_url=str(pg_url).strip(),
+        embedding=embedding,
     )
     session.bind_story_template_service(service)
 
@@ -149,13 +153,25 @@ def main() -> int:
             print(f"Stagebound 数据库初始化失败：{exc}", flush=True)
             return 1
 
+    # 回忆栈与情节模板共用同一个 bge 实例：首次真正需要时才加载权重（保住「没配就不加载」），
+    # 之后两条路径复用，避免重复 Loading weights。
+    _shared_embedding: list = []
+
+    def _get_shared_embedding():
+        if not _shared_embedding:
+            from embedding import BgeEmbeddingModel
+
+            _shared_embedding.append(BgeEmbeddingModel())
+        return _shared_embedding[0]
+
     # 回忆栈：需存档库 + 非空 recall 连接串（Postgres）。启动失败仅降级，不拖垮主服务。
     recall_indexer = None
     recall_url = str(args.recall_database_url or "").strip()
     if save_database is not None and recall_url:
         try:
             recall_indexer = _setup_recall(
-                session, save_database=save_database, recall_url=recall_url
+                session, save_database=save_database, recall_url=recall_url,
+                embedding=_get_shared_embedding(),
             )
         except Exception as exc:
             print(f"Stagebound 回忆功能初始化失败（已降级为未启用）：{exc}", flush=True)
@@ -165,7 +181,15 @@ def main() -> int:
     template_pg = os.environ.get("PG_URL", "")
     template_enabled = False
     try:
-        _maybe_setup_story_template(session, mysql_url=template_mysql, pg_url=template_pg)
+        template_embedding = (
+            _get_shared_embedding()
+            if str(template_mysql).strip() and str(template_pg).strip()
+            else None
+        )
+        _maybe_setup_story_template(
+            session, mysql_url=template_mysql, pg_url=template_pg,
+            embedding=template_embedding,
+        )
         template_enabled = bool(str(template_mysql).strip() and str(template_pg).strip())
     except Exception as exc:  # noqa: BLE001 - 模板库故障仅降级,不拖垮主服务
         print(f"情节模板：启动失败已降级 -> {exc}", flush=True)
