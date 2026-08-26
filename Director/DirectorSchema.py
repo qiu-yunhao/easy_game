@@ -20,6 +20,15 @@ DIRECTOR_RESPONSE_SCHEMA = {
                 },
                 "response_groups": {
                     "type": "array",
+                    "description": (
+                        "Partition of who_should_respond into ordered sub-lists. "
+                        "Characters in the SAME sub-list react independently to the player's "
+                        "latest action and act simultaneously (parallel). Put characters into "
+                        "DIFFERENT sub-lists when one must speak before another reacts (a causal "
+                        "chain, serial). Prefer merging characters who do not answer each other "
+                        "into one sub-list to reduce turn latency. Must cover every id in "
+                        "who_should_respond exactly once."
+                    ),
                     "items": {
                         "type": "array",
                         "items": {"type": "string"},
