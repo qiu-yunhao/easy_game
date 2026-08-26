@@ -6,7 +6,7 @@ import os
 import re
 import time
 from collections.abc import Sequence
-from typing import Any, TypedDict
+from typing import Any, Callable, TypedDict
 
 from dotenv import load_dotenv
 
@@ -81,11 +81,12 @@ class BaseAgent:
         instruction: str,
         history: Sequence[AgentMessage] | None = None,
         response_format: str | dict[str, Any] | None = None,
+        on_token: Callable[[str], None] | None = None,
     ) -> Any:
         started = time.perf_counter()
         perf_flags = {"fallback": False, "repair": False}
         try:
-            return self._command_inner(instruction, history, response_format, perf_flags)
+            return self._command_inner(instruction, history, response_format, perf_flags, on_token)
         finally:
             elapsed_ms = (time.perf_counter() - started) * 1000.0
             llm_perf_logger.info(
@@ -102,6 +103,7 @@ class BaseAgent:
         history: Sequence[AgentMessage] | None,
         response_format: str | dict[str, Any] | None,
         perf_flags: dict[str, bool],
+        on_token: Callable[[str], None] | None = None,
     ) -> Any:
         client = self._build_client()
         messages = [
@@ -142,7 +144,8 @@ class BaseAgent:
         def _run_fallback() -> Any:
             perf_flags["fallback"] = True
             fallback_params = dict(params)
-            fallback_params.pop("response_format", None)
+            # endpoint 不支持 json_schema,但支持 json_object:降级而非放弃格式约束,减少 malformed→repair。
+            fallback_params["response_format"] = {"type": "json_object"}
             fallback_messages = list(messages)
             fallback_messages[-1] = {
                 "role": "user",
@@ -150,6 +153,25 @@ class BaseAgent:
             }
             fallback_params["messages"] = fallback_messages
             return client.chat.completions.create(**fallback_params)
+
+        # 纯文本 + 有 token 回调：走流式，逐 delta 回调，累积成完整 content 后返回
+        # （返回值与非流式一致，仅额外提供实时增量）。结构化 JSON 不走此路。
+        if response_format is None and on_token is not None:
+            stream_params = dict(params)
+            stream_params["stream"] = True
+            chunks: list[str] = []
+            for chunk in client.chat.completions.create(**stream_params):
+                choices = getattr(chunk, "choices", None)
+                if not choices:
+                    continue
+                delta = getattr(choices[0].delta, "content", None) or ""
+                if delta:
+                    chunks.append(delta)
+                    on_token(delta)
+            content = "".join(chunks)
+            if not content:
+                raise ValueError("LLM returned an empty response.")
+            return content
 
         structured = response_format is not None and "response_format" in params
         if structured and endpoint in self._response_format_unsupported:
