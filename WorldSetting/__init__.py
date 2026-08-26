@@ -1,3 +1,4 @@
+from WorldSetting.advancement import can_advance
 from WorldSetting.schema import (
     ADVANCE_CONDITION_TYPES,
     AdvanceCondition,
@@ -20,5 +21,6 @@ __all__ = [
     "build_advance_condition",
     "build_empty_world_setting",
     "build_tier",
+    "can_advance",
     "validate_world_setting",
 ]
