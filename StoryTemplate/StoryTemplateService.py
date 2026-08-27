@@ -116,3 +116,25 @@ class StoryTemplateService:
             filters={"template_id": str(template_id), "doc_type": "style_passage"},
         )
         return [s.doc.text for s in scored]
+
+    def search_template_passages(self, query: str, *, top_k: int = 6) -> list[dict[str, Any]]:
+        """Find short references across templates without adding another index."""
+        query = (query or "").strip()
+        if not query:
+            return []
+        vector = self._embedding.encode([query])[0]
+        scored = self._vector_store.search(vector, top_k=max(1, top_k * 2), filters={"doc_type": "style_passage"})
+        titles = {int(item["template_id"]): str(item.get("source_title", "") or "") for item in self.list_templates()}
+        grouped: dict[int, dict[str, Any]] = {}
+        for item in scored:
+            metadata = item.doc.metadata or {}
+            try:
+                template_id = int(metadata.get("template_id", 0) or 0)
+            except (TypeError, ValueError):
+                continue
+            if template_id <= 0:
+                continue
+            group = grouped.setdefault(template_id, {"template_id": template_id, "source_title": titles.get(template_id, ""), "passages": [], "score": item.score})
+            if len(group["passages"]) < 2:
+                group["passages"].append(item.doc.text[:240])
+        return list(grouped.values())[:3]

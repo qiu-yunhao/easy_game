@@ -3,6 +3,7 @@ from __future__ import annotations
 from Cultivation import build_chapter_transition_requirement
 from GameState import GameState
 from History.GameMemory import empty_memory_state
+from WorldSetting.runtime import transition_requirement
 
 
 def _build_transition_scene(
@@ -53,7 +54,11 @@ def build_chapter_transition_payload(
             "current_chapter_index": next_index,
             "current_chapter_realm": next_chapter_realm,
             "next_chapter_realm": following_realm,
-            "chapter_transition_requirement": build_chapter_transition_requirement(next_chapter_realm, following_realm),
+            "chapter_transition_requirement": (
+                transition_requirement(state["plot"]["world_setting"], next_chapter_realm, following_realm)
+                if isinstance(state["plot"].get("world_setting"), dict)
+                else build_chapter_transition_requirement(next_chapter_realm, following_realm)
+            ),
         },
         "scene": _build_transition_scene(
             state, next_location, f"chapter-{next_index + 1}", f"进入{next_title}" if next_title else "进入下一章", 0.34, next_focus, default_on_stage

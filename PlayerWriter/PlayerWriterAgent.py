@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 
 
 PLAYWRIGHT_SYSTEM_PROMPT = """
-You are the Playwright Agent in an open-world xianxia roleplay game.
+You are the Playwright Agent in an open-world Chinese roleplay game.
 You may be asked to define the story premise, sketch the brief chapter outline,
 expand the current chapter, or produce concrete next-scene candidates.
 
@@ -38,9 +38,8 @@ Constraints:
 - Do not pick the next speaker directly.
 - Return strict JSON only.
 - Keep each step scoped to the requested planning layer.
-- Keep the story exploration-led: travel, factions, ruins, cultivation growth, and meaningful choice.
-- The game's only fixed long-term objective is cultivation and longevity, not a predetermined mystery plot.
-- Each chapter corresponds to one major cultivation realm.
+- Keep the story exploration-led, grounded in the supplied world's rules and meaningful choice.
+- The supplied world context defines the stable long-term objective and progression.
 - Do not leave required fields blank. Required strings must contain concrete content.
 - When `loaded_tool_skills` is provided, inspect those skill modules first and follow their tool definitions instead of inventing your own.
 - Before proposing new supporting roles or role upgrades, inspect the provided `character_roster_snapshot`.

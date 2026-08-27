@@ -48,6 +48,16 @@ class StageboundRequestHandler(BaseHTTPRequestHandler):
         if parsed.path == "/api/templates":
             self._write_json(HTTPStatus.OK, {"templates": self.server.session.list_templates()})
             return
+        if parsed.path == "/api/world-settings":
+            self._write_json(HTTPStatus.OK, {"world_settings": self.server.session.list_world_settings()})
+            return
+        if parsed.path.startswith("/api/world-settings/"):
+            tag = parsed.path.rsplit("/", 1)[-1]
+            try:
+                self._write_json(HTTPStatus.OK, self.server.session.get_world_setting_template(tag))
+            except (RuntimeError, ValueError) as exc:
+                self._write_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
+            return
         if parsed.path.startswith("/api/templates/"):
             raw_id = parsed.path.rsplit("/", 1)[-1]
             try:
@@ -197,6 +207,22 @@ class StageboundRequestHandler(BaseHTTPRequestHandler):
             return HTTPStatus.OK, self.server.session.auto_step(max_beats=max_beats)
         if path == "/api/reset":
             return HTTPStatus.OK, self.server.session.reset(**self._build_reset_kwargs(payload))
+        if path == "/api/world-builder/start":
+            raw_tag = payload.get("genre_tag")
+            return HTTPStatus.OK, self.server.session.start_world_builder(
+                str(raw_tag) if raw_tag is not None else None,
+            )
+        if path == "/api/world-builder/answer":
+            if "answer" not in payload:
+                raise RuntimeError("`answer` 为必填。")
+            raw_template_id = payload.get("reference_template_id")
+            return HTTPStatus.OK, self.server.session.answer_world_builder(
+                payload["answer"],
+                reference_query=str(payload.get("reference_query", "") or ""),
+                reference_template_id=(self._as_int(raw_template_id, field_name="reference_template_id") if raw_template_id is not None else None),
+            )
+        if path == "/api/world-builder/apply":
+            return HTTPStatus.OK, self.server.session.apply_world_builder()
         if path == "/api/new-game":
             user_id = self._as_int(payload.get("user_id"), field_name="user_id")
             starter_story_templates = payload.get("starter_story_templates")
@@ -251,6 +277,11 @@ class StageboundRequestHandler(BaseHTTPRequestHandler):
         player_profile = payload.get("player_profile")
         if player_profile is not None and not isinstance(player_profile, dict):
             raise RuntimeError("`player_profile` 必须是一个 JSON 对象。")
+        world_setting = payload.get("world_setting")
+        if world_setting is not None and not isinstance(world_setting, dict):
+            raise RuntimeError("`world_setting` 必须是一个 JSON 对象。")
+        if world_setting is not None and payload.get("genre_tag") is not None:
+            raise RuntimeError("`world_setting` 与 `genre_tag` 只能提供一个。")
         return {
             "mode": str(value) if (value := payload.get("mode")) is not None else None,
             "player_character": str(value) if (value := payload.get("player_character")) is not None else None,
@@ -261,6 +292,8 @@ class StageboundRequestHandler(BaseHTTPRequestHandler):
                 if (value := payload.get("selected_template_id")) is not None
                 else None
             ),
+            "world_setting": world_setting,
+            "genre_tag": str(value) if (value := payload.get("genre_tag")) is not None else None,
         }
 
     def _as_int(self, value: Any, *, field_name: str) -> int:

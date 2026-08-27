@@ -39,7 +39,12 @@ from Narrator.NarrationPresets import (
 )
 from PlayerControl import ConsolePlayerInterface
 from StoryStateUtils import clean_str_list, clean_text
-from WorldSetting import apply_world_setting, build_xianxia_world_setting
+from WorldSetting import (
+    apply_world_setting,
+    build_xianxia_world_setting,
+    transition_requirement,
+    validate_world_setting,
+)
 
 
 PLAYER_CHARACTER_ID = "player"
@@ -238,6 +243,7 @@ def build_opening_state(
     player_objective: str,
     scene_notes: list[str],
     director_notes: list[str],
+    world_setting: dict[str, Any] | None = None,
 ) -> GameState:
     return create_initial_game_state(
         plot={
@@ -260,14 +266,16 @@ def build_opening_state(
             "chapter_focus_source": "",
             "scene_candidates_source": "",
             "current_chapter_index": 0,
-            "selected_template_id": 0,
+            "selected_template_id": int(((world_setting or {}).get("template_ref") or [{}])[0].get("template_id", 0) or 0),
+            "world_setting": dict(world_setting or build_xianxia_world_setting()),
             "cultivation_goal": cultivation_goal,
             "current_player_realm": current_player_realm,
             "current_chapter_realm": current_chapter_realm,
             "next_chapter_realm": next_chapter_realm,
-            "chapter_transition_requirement": build_chapter_transition_requirement(
-                current_chapter_realm,
-                next_chapter_realm,
+            "chapter_transition_requirement": (
+                transition_requirement(world_setting, current_chapter_realm, next_chapter_realm)
+                if world_setting is not None
+                else build_chapter_transition_requirement(current_chapter_realm, next_chapter_realm)
             ),
             "completed_chapters": [],
         },
@@ -337,7 +345,14 @@ def build_opening_player_context(
 def build_default_state(
     player_character: str | None = None,
     character_profiles: dict[str, dict[str, Any]] | None = None,
+    world_setting: dict[str, Any] | None = None,
 ) -> GameState:
+    if world_setting is not None:
+        return build_state_from_world_setting(
+            world_setting,
+            player_character=player_character,
+            character_profiles=character_profiles,
+        )
     profiles = ensure_character_profiles(character_profiles or build_default_character_profiles(), player_character_id=PLAYER_CHARACTER_ID)
     player_profile = profiles[PLAYER_CHARACTER_ID]
     player_context = build_opening_player_context(player_profile)
@@ -367,6 +382,45 @@ def build_default_state(
         director_notes=[
             "开场优先给玩家空间观察和自我定位，再逐步引出可交互人物与修行线索。",
         ],
+        world_setting=world_setting or build_xianxia_world_setting(),
+    )
+
+
+def build_state_from_world_setting(
+    world_setting: dict[str, Any],
+    *,
+    player_character: str | None = None,
+    character_profiles: dict[str, dict[str, Any]] | None = None,
+) -> GameState:
+    """Build an opening from a validated setting without falling back to xianxia seeds."""
+    validate_world_setting(world_setting)
+    applied = apply_world_setting(world_setting)
+    profiles = ensure_character_profiles(applied["character_profiles"], player_character_id=PLAYER_CHARACTER_ID)
+    if character_profiles:
+        supplied = ensure_character_profiles(character_profiles, player_character_id=PLAYER_CHARACTER_ID)
+        profiles[PLAYER_CHARACTER_ID] = ensure_character_profile(
+            {**profiles[PLAYER_CHARACTER_ID], **supplied[PLAYER_CHARACTER_ID]},
+            character_id=PLAYER_CHARACTER_ID,
+            include_backpack=True,
+        )
+    opening = applied["opening_kwargs"]
+    setting_title = str(world_setting.get("title", "") or "")
+    return build_opening_state(
+        player_character=player_character,
+        chapter_id="opening-arc-1",
+        scene_id="opening-scene",
+        location_id=str(opening["location_id"]),
+        time_tag="开场",
+        beat=setting_title or "故事开场",
+        cultivation_goal=str(opening["cultivation_goal"]),
+        current_player_realm=str(opening["current_player_realm"]),
+        current_chapter_realm=str(opening["current_chapter_realm"]),
+        next_chapter_realm=str(opening["next_chapter_realm"]),
+        player_intent="先观察环境与人物，再决定下一步行动。",
+        player_objective=str(world_setting.get("core_drive", "") or "探索眼前的世界。"),
+        scene_notes=list(opening["scene_notes"]),
+        director_notes=[f"世界冲突：{world_setting.get('core_conflict', '')}"],
+        world_setting=world_setting,
     )
 
 

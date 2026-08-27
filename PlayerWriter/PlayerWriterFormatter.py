@@ -22,6 +22,7 @@ from GameState import SceneCandidate
 from PromptUtils import render_json_instruction
 from ScenePlan import ScenePlan, empty_scene_plan
 from StoryToolContext import build_story_tool_prompt_context
+from WorldSetting.runtime import chapter_tier_sequence, transition_requirement, world_context
 
 if TYPE_CHECKING:
     from CharacterRosterTools import CharacterRosterToolRuntime
@@ -70,6 +71,9 @@ def _resolve_outline_realm_start(
     game_state: "GameState",
     character_profiles: dict[str, "CharacterProfile"],
 ) -> str:
+    setting = game_state["plot"].get("world_setting")
+    if isinstance(setting, dict):
+        return str(game_state["plot"].get("current_chapter_realm", "") or "")
     existing_outline = story_outline_entries(game_state)
     if existing_outline:
         last_outline = existing_outline[-1]
@@ -248,11 +252,9 @@ class PlaywrightFormatter:
             player_id=player_id,
         )
         payload = {
-            "creative_goal": (
-                "Define an open-world xianxia story premise centered on cultivation and longevity. "
-                "The story should feel open at the start, without a fixed investigation-style mainline."
-            ),
-            "fixed_global_goal": "修仙求长生",
+            "creative_goal": "Define an open-world story premise centered on the supplied world's core drive.",
+            "fixed_global_goal": world_context(game_state["plot"].get("world_setting"))["core_drive"],
+            "world_context": world_context(game_state["plot"].get("world_setting")),
             "player_character_id": player_id,
             "player_profile": {
                 "name": player_profile.get("name", player_id),
@@ -305,7 +307,11 @@ class PlaywrightFormatter:
         )
         resolved_profiles = character_profiles or {}
         starting_realm = _resolve_outline_realm_start(game_state, resolved_profiles)
-        realm_pairs = chapter_realm_sequence(starting_realm, desired_chapter_count)
+        setting = game_state["plot"].get("world_setting")
+        realm_pairs = (
+            chapter_tier_sequence(setting, starting_realm, desired_chapter_count)
+            if isinstance(setting, dict) else chapter_realm_sequence(starting_realm, desired_chapter_count)
+        )
         for index, chapter in enumerate(output.get("story_outline", []) if output else [], start=1):
             fallback_id = fallback_ids[index - 1] if index - 1 < len(fallback_ids) else fallback_ids[-1]
             realm_stage, next_realm = realm_pairs[index - 1] if index - 1 < len(realm_pairs) else realm_pairs[-1]
@@ -340,9 +346,14 @@ class PlaywrightFormatter:
             player_id=player_id,
         )
         starting_realm = _resolve_outline_realm_start(game_state, character_profiles)
+        setting = game_state["plot"].get("world_setting")
+        planned_pairs = (
+            chapter_tier_sequence(setting, starting_realm, desired_chapter_count)
+            if isinstance(setting, dict) else chapter_realm_sequence(starting_realm, desired_chapter_count)
+        )
         planned_realm_sequence = [
             {"realm_stage": realm_stage, "next_realm": next_realm}
-            for realm_stage, next_realm in chapter_realm_sequence(starting_realm, desired_chapter_count)
+            for realm_stage, next_realm in planned_pairs
         ]
         existing_outline = [
             {
@@ -362,11 +373,9 @@ class PlaywrightFormatter:
             "summary": "",
         }
         payload = {
-            "creative_goal": (
-                "Generate the next short batch of future chapter slots for a rolling xianxia outline. "
-                "Each chapter corresponds to exactly one major cultivation realm and should define only its title, main goal, and concise summary."
-            ),
-            "fixed_global_goal": "修仙求长生",
+            "creative_goal": "Generate future chapter slots for a rolling outline; each slot follows one supplied progression tier.",
+            "fixed_global_goal": world_context(game_state["plot"].get("world_setting"))["core_drive"],
+            "world_context": world_context(game_state["plot"].get("world_setting")),
             "desired_chapter_count": desired_chapter_count,
             "player_character_id": player_id,
             "player_profile": {
@@ -411,7 +420,7 @@ class PlaywrightFormatter:
             "Produce the next batch of brief story outline entries as strict JSON. "
             f"Return exactly {desired_chapter_count} future chapters that come after the already planned outline. "
             "Keep each summary to 1-2 sentences. Do not repeat existing chapters. "
-            "The story's only stable long-term objective is immortality through cultivation, and each chapter must feel open-ended in how that progress is achieved. "
+            "The supplied world context defines the stable long-term objective, and each chapter must feel open-ended in how progress is achieved. "
             "Respect player-specified supporting characters when they exist. "
             "If some supporting characters have not been assigned to chapters yet, you may decide how many chapters they should materially influence. "
             "Do not expand hooks or locations yet.",
@@ -465,7 +474,8 @@ class PlaywrightFormatter:
                 "Expand only the current chapter slot into a concrete chapter goal, overview, hooks, "
                 "and key locations. Preserve continuity with completed chapters while keeping the route to progression open-ended."
             ),
-            "fixed_global_goal": "修仙求长生",
+            "fixed_global_goal": world_context(game_state["plot"].get("world_setting"))["core_drive"],
+            "world_context": world_context(game_state["plot"].get("world_setting")),
             "player_character_id": player_id,
             "player_profile": {
                 "name": player_profile.get("name", player_id),
@@ -495,9 +505,10 @@ class PlaywrightFormatter:
                 "current_chapter_index": int(game_state["plot"].get("current_chapter_index", 0) or 0),
                 "current_chapter_realm": chapter_realm,
                 "next_chapter_realm": next_realm,
-                "chapter_transition_requirement": build_chapter_transition_requirement(
-                    chapter_realm,
-                    next_realm,
+                "chapter_transition_requirement": (
+                    transition_requirement(game_state["plot"]["world_setting"], chapter_realm, next_realm)
+                    if isinstance(game_state["plot"].get("world_setting"), dict)
+                    else build_chapter_transition_requirement(chapter_realm, next_realm)
                 ),
                 "story_premise": game_state["plot"].get("story_premise", ""),
                 "exploration_drive": game_state["plot"].get("exploration_drive", ""),
@@ -516,7 +527,7 @@ class PlaywrightFormatter:
         return render_json_instruction(
             "Expand the current chapter as strict JSON. "
             "Keep the chapter overview concise, use the chapter cast when relevant, and return 2-4 exploration hooks plus 2-4 key locations. "
-            "The chapter should feel like one cultivation realm's worth of open-ended growth, not a single mandatory questline.",
+            "The chapter should feel like one progression tier's worth of open-ended growth, not a single mandatory questline.",
             payload,
         )
 
@@ -575,11 +586,9 @@ class PlaywrightFormatter:
             )
 
         payload = {
-            "creative_goal": (
-                "Generate 2-3 scene candidates for the current moment. "
-                "Each candidate should be a playable next scene that advances the current chapter's cultivation progress."
-            ),
-            "fixed_global_goal": "修仙求长生",
+            "creative_goal": "Generate 2-3 playable next scenes that advance the current chapter's progress.",
+            "fixed_global_goal": world_context(game_state["plot"].get("world_setting"))["core_drive"],
+            "world_context": world_context(game_state["plot"].get("world_setting")),
             "plot": {
                 "chapter_id": game_state["plot"]["chapter_id"],
                 "scene_id": game_state["plot"]["scene_id"],
@@ -635,7 +644,7 @@ class PlaywrightFormatter:
             "Generate scene candidates as strict JSON. "
             "Return 2 or 3 concise candidates. Each candidate should define a concrete location, beat, "
             "scene goal, constraints, and exit condition. Keep the active scene playable with the current on-stage cast, "
-            "while staying aware of the broader chapter cast. Favor open-world cultivation choices over single-solution plot rails. Do not write dialogue.",
+            "while staying aware of the broader chapter cast. Favor open-world choices over single-solution plot rails. Do not write dialogue.",
             payload,
         )
 

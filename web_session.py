@@ -39,9 +39,11 @@ from session_bootstrap import (
     build_default_character_profiles,
     build_default_scene_config,
     build_default_state,
+    build_state_from_world_setting,
     build_graph_dependencies,
     warm_model_clients,
 )
+from WorldSetting import WorldBuilderWorkflow, apply_world_setting, get_template, list_genres, validate_world_setting, world_context
 
 if TYPE_CHECKING:
     from Persistence.Store import GameSaveStore
@@ -187,6 +189,7 @@ class SessionConfig:
     player_profile: dict[str, Any] | None = None
     narration_style_preset: str = DEFAULT_NARRATION_STYLE_PRESET
     selected_template_id: int | None = None
+    world_setting: dict[str, Any] | None = None
 
 
 class WebGameSession:
@@ -195,6 +198,7 @@ class WebGameSession:
         self.config.narration_style_preset = resolve_narration_style_preset(self.config.narration_style_preset)
         self._lock = threading.Lock()
         self._story_template_service = None
+        self._world_builder: WorldBuilderWorkflow | None = None
         self.selected_template_id: int | None = self.config.selected_template_id
         self._player_interface = BufferedPlayerInterface()
         self.save_store: GameSaveStore | None = None
@@ -218,8 +222,17 @@ class WebGameSession:
         player_profile: dict[str, Any] | None = None,
         narration_style_preset: str | None = None,
         selected_template_id: int | None = None,
+        world_setting: dict[str, Any] | None = None,
+        genre_tag: str | None = None,
     ) -> dict[str, Any]:
         with self._lock:
+            if world_setting is not None and genre_tag is not None:
+                raise RuntimeError("`world_setting` 与 `genre_tag` 只能提供一个。")
+            if genre_tag is not None:
+                world_setting = get_template(genre_tag)
+            if world_setting is not None:
+                validate_world_setting(world_setting)
+                self.config.world_setting = _json_clone(world_setting)
             for field, value in (
                 ("mode", mode),
                 ("player_character", player_character),
@@ -337,6 +350,54 @@ class WebGameSession:
         with self._lock:
             return self._require_template_service_unlocked().list_templates()
 
+    def list_world_settings(self) -> list[dict[str, str]]:
+        return list_genres()
+
+    def get_world_setting_template(self, genre_tag: str) -> dict[str, Any]:
+        return get_template(genre_tag)
+
+    def start_world_builder(self, genre_tag: str | None = None) -> dict[str, Any]:
+        with self._lock:
+            self._world_builder = WorldBuilderWorkflow(genre_tag=genre_tag)
+            return self._world_builder.view()
+
+    def answer_world_builder(
+        self,
+        answer: Any,
+        *,
+        reference_query: str = "",
+        reference_template_id: int | None = None,
+    ) -> dict[str, Any]:
+        with self._lock:
+            if self._world_builder is None:
+                raise RuntimeError("请先开始世界设定对话。")
+            if reference_template_id is not None:
+                passages: list[str] = []
+                if self._story_template_service is not None:
+                    try:
+                        passages = self._story_template_service.search_style_passages(reference_template_id, query=reference_query, top_k=2)
+                    except Exception:
+                        passages = []
+                self._world_builder.add_template_reference(reference_template_id, passages)
+            result = self._world_builder.answer(answer)
+            if reference_query and self._story_template_service is not None:
+                try:
+                    result["reference_candidates"] = self._story_template_service.search_template_passages(reference_query)
+                except Exception:
+                    result["reference_candidates"] = []
+            return result
+
+    def apply_world_builder(self) -> dict[str, Any]:
+        with self._lock:
+            if self._world_builder is None or not self._world_builder.complete:
+                raise RuntimeError("世界设定尚未完成，不能应用。")
+            setting = self._world_builder.draft
+            validate_world_setting(setting)
+            self.config.world_setting = _json_clone(setting)
+            self.last_handoff_reason = "世界设定已确认，正在重建开场场景。"
+            self._rebuild_session(initialize_story=True)
+            return self.serialize_state()
+
     def get_template_detail(self, template_id: int) -> dict[str, Any]:
         with self._lock:
             return self._require_template_service_unlocked().get_template_detail(template_id)
@@ -425,6 +486,7 @@ class WebGameSession:
                 "narration_style_preset": self.config.narration_style_preset,
                 "story_initialized": self.story_initialized,
                 "last_handoff_reason": self.last_handoff_reason,
+                "world_setting": _json_clone(self.config.world_setting),
             },
             "state": state,
             "character_profiles": profiles,
@@ -558,11 +620,7 @@ class WebGameSession:
             if not is_player_turn(self.state):
                 raise RuntimeError("当前还没有轮到玩家行动。")
 
-            profiles = self.character_profiles
-            player_character = self.config.player_character
-
-            def _emit(entry: dict[str, Any]) -> None:
-                on_event(_serialize_history_entry(entry, player_character, profiles))
+            _emit = self._make_stream_emitter(on_event)
 
             tool_response = self._maybe_handle_player_intent_plan_unlocked(raw_input)
             if tool_response is not None:
@@ -686,14 +744,38 @@ class WebGameSession:
                 **self.state,
                 "player": {**self.state["player"], "auto_mode": False},
             }
+        self._world_builder = None
 
     def _rebuild_session(self, *, initialize_story: bool = False) -> None:
-        self.character_profiles = build_default_character_profiles(self.config.player_profile)
+        if self.config.world_setting is not None:
+            self.character_profiles = ensure_character_profiles(
+                apply_world_setting(self.config.world_setting)["character_profiles"],
+                player_character_id=PLAYER_CHARACTER_ID,
+            )
+            if self.config.player_profile:
+                self.character_profiles[PLAYER_CHARACTER_ID] = ensure_character_profile(
+                    {**self.character_profiles[PLAYER_CHARACTER_ID], **self.config.player_profile},
+                    character_id=PLAYER_CHARACTER_ID,
+                    include_backpack=True,
+                )
+            self.state = build_state_from_world_setting(
+                self.config.world_setting,
+                player_character=self.config.player_character,
+                character_profiles=self.character_profiles,
+            )
+            if self.selected_template_id is None:
+                refs = self.config.world_setting.get("template_ref", []) or []
+                template_id = refs[0].get("template_id") if refs and isinstance(refs[0], dict) else None
+                if template_id is not None:
+                    self.selected_template_id = int(template_id)
+                    self.config.selected_template_id = self.selected_template_id
+        else:
+            self.character_profiles = build_default_character_profiles(self.config.player_profile)
+            self.state = build_default_state(
+                player_character=self.config.player_character,
+                character_profiles=self.character_profiles,
+            )
         self.scene_config = build_default_scene_config(self.config.narration_style_preset)
-        self.state = build_default_state(
-            player_character=self.config.player_character,
-            character_profiles=self.character_profiles,
-        )
         self._reload_dependencies()
         self.story_initialized = False
         self._reset_auto_mode_flags_unlocked()
@@ -871,6 +953,10 @@ class WebGameSession:
             "parser_status": _resolve_parser_status(self.story_initialized, state),
         }
         payload["selected_template_id"] = self.selected_template_id
+        payload["world_summary"] = {
+            "title": str((plot.get("world_setting") or {}).get("title", "") or ""),
+            **world_context(plot.get("world_setting")),
+        }
         payload["prompt_templates"] = _build_prompt_templates(payload)
         return payload
 

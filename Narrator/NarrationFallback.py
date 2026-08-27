@@ -81,11 +81,11 @@ def build_fallback_intro_text(
     intro_kind: str,
     style_preset: str,
 ) -> str:
-    del style_preset  # Fallback stays in a stable xianxia register.
+    del style_preset
 
     player_id = str(state["player"].get("controlled_character", "") or "").strip()
     player_profile = character_profiles.get(player_id, {})
-    player_name = _clean_clause(str(player_profile.get("name", "") or player_id)) or "那名修士"
+    player_name = _clean_clause(str(player_profile.get("name", "") or player_id)) or "那名旅人"
     player_background = _clean_clause(str(player_profile.get("background", "") or ""))
     location = _clean_clause(str(state["scene"].get("location_id", "") or "")) or "陌生地界"
     story_premise = _clean_clause(str(state["plot"].get("story_premise", "") or ""))
@@ -98,7 +98,7 @@ def build_fallback_intro_text(
         str((state["plot"].get("completed_chapters", []) or [{}])[-1].get("summary", "") or "")
     )
     lingering_clause = (
-        f"上一场冲突留下的余压尚未散尽，{player_name}已循着新的气机来到{location}"
+        f"上一场冲突留下的余压尚未散尽，{player_name}已循着新的线索来到{location}"
         if _needs_transition_afterglow(state)
         else ""
     )
@@ -137,7 +137,7 @@ def build_fallback_intro_text(
     if intro_kind == "chapter":
         return _join_sentences(
             [
-                lingering_clause or f"上一段风波余意未散，{player_name}已循着新的气机来到{location}",
+                lingering_clause or f"上一段风波余意未散，{player_name}已循着新的线索来到{location}",
                 last_chapter_summary and f"前章留下的余波仍在：{last_chapter_summary}",
                 cast_sentence
                 or f"此章《{chapter_title or '新章'}》将起，前路牵动的仍是{chapter_goal or chapter_overview or '未定的机缘与冲突'}",
@@ -148,8 +148,8 @@ def build_fallback_intro_text(
     background_clause = player_background or "带着尚未明朗的前缘与心愿"
     return _join_sentences(
         [
-            lingering_clause or f"{location}云气未散，{player_name}{background_clause}",
-            cast_sentence or story_premise or "仙途广阔，人事与机缘都还在暗处起伏",
+            lingering_clause or f"{location}晨雾未散，{player_name}{background_clause}",
+            cast_sentence or story_premise or "前路广阔，人事与机缘都还在暗处起伏",
             chapter_goal or chapter_overview or exploration_drive or "他眼下能做的，便是先踏出自己的第一步",
         ]
     )

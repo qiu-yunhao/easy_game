@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Literal, Optional, TypedDict
+from typing import Any, Literal, Optional, TypedDict
 
 from CharacterMemory import CharacterMemoryState, empty_character_memory_state
 from Director.DirectorBrief import DirectorBrief, empty_director_brief
@@ -74,6 +74,7 @@ class PlotState(TypedDict):
     chapter_transition_requirement: str
     completed_chapters: list[ChapterArchive]
     selected_template_id: int
+    world_setting: dict[str, Any]
 
 
 class SceneState(TypedDict):

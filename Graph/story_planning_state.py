@@ -5,6 +5,7 @@ from typing import Any
 from Cultivation import build_chapter_transition_requirement
 from GameState import GameState
 from StoryStateUtils import outline_index, story_outline_entries
+from WorldSetting.runtime import transition_requirement
 
 
 def _resolve_story_foundation_source(plot: dict[str, object]) -> str:
@@ -166,9 +167,10 @@ def _apply_story_outline_brief(
         "next_chapter_realm": str(current_outline_entry.get("next_realm", "") or "").strip()
         or str(state["plot"].get("next_chapter_realm", "") or "").strip(),
     }
-    next_plot["chapter_transition_requirement"] = build_chapter_transition_requirement(
-        next_plot.get("current_chapter_realm", ""),
-        next_plot.get("next_chapter_realm", ""),
+    setting = next_plot.get("world_setting")
+    next_plot["chapter_transition_requirement"] = (
+        transition_requirement(setting, next_plot.get("current_chapter_realm", ""), next_plot.get("next_chapter_realm", ""))
+        if isinstance(setting, dict) else build_chapter_transition_requirement(next_plot.get("current_chapter_realm", ""), next_plot.get("next_chapter_realm", ""))
     )
     next_plot["story_foundation_source"] = _resolve_story_foundation_source(next_plot)
     return {
@@ -221,9 +223,10 @@ def _apply_chapter_expansion(
             "chapter_expansion_source": source,
             "chapter_focus_source": source,
             "story_outline": updated_outline,
-            "chapter_transition_requirement": build_chapter_transition_requirement(
-                state["plot"].get("current_chapter_realm", ""),
-                state["plot"].get("next_chapter_realm", ""),
+            "chapter_transition_requirement": (
+                transition_requirement(state["plot"]["world_setting"], state["plot"].get("current_chapter_realm", ""), state["plot"].get("next_chapter_realm", ""))
+                if isinstance(state["plot"].get("world_setting"), dict)
+                else build_chapter_transition_requirement(state["plot"].get("current_chapter_realm", ""), state["plot"].get("next_chapter_realm", ""))
             ),
         },
     }

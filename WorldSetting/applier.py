@@ -40,6 +40,15 @@ def apply_world_setting(world_setting: WorldSetting) -> dict[str, Any]:
         profile = _seed_to_profile(seed, default_id=f"npc_{index}")
         profiles[profile["character_id"]] = profile
 
+    # CharacterProfile keeps legacy field names for save compatibility.  Supplying
+    # neutral values here prevents non-xianxia worlds from inheriting xianxia text.
+    for profile in profiles.values():
+        profile.update({
+            "spiritual_root": world_setting.get("power_system", "") or "世界资质",
+            "realm": current_tier["name"],
+            "main_technique": world_setting.get("power_system", "") or "基础能力",
+        })
+
     scene_notes = [
         f"世界基调：{world_setting.get('tone', '')}",
         f"核心冲突：{world_setting.get('core_conflict', '')}",
@@ -58,6 +67,7 @@ def apply_world_setting(world_setting: WorldSetting) -> dict[str, Any]:
             "current_chapter_realm": current_tier["name"],
             "next_chapter_realm": next_tier["name"],
             "scene_notes": scene_notes,
+            "world_setting": world_setting,
         },
         "character_profiles": profiles,
     }

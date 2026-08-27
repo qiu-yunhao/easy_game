@@ -30,4 +30,9 @@ export const api = {
   templateDetail: (id) => getJson(`/api/templates/${id}`),
   importTemplate: (payload) => postJson("/api/templates/import", payload),
   selectTemplate: (templateId) => postJson("/api/templates/select", { template_id: templateId }),
+  listWorldSettings: () => getJson("/api/world-settings"),
+  worldSettingTemplate: (tag) => getJson(`/api/world-settings/${encodeURIComponent(tag)}`),
+  startWorldBuilder: (genreTag) => postJson("/api/world-builder/start", genreTag ? { genre_tag: genreTag } : {}),
+  answerWorldBuilder: (payload) => postJson("/api/world-builder/answer", payload),
+  applyWorldBuilder: () => postJson("/api/world-builder/apply", {}),
 };

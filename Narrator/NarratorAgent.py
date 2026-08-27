@@ -13,10 +13,11 @@ from Narrator.NarratorSchema import (
 )
 from Narrator.NarratorTypes import NarratedSegment, NarrationQueueItem
 from PromptUtils import render_json_instruction
+from WorldSetting.runtime import world_context
 
 
 NARRATOR_SYSTEM_PROMPT = """
-You are the Narrator Agent in a multi-character Chinese xianxia story game.
+You are the Narrator Agent in a multi-character Chinese story game.
 You may be asked to either:
 - turn a small batch of raw character actions into third-person narrative lines
 - turn structured story planning into an opening or chapter introduction for the player
@@ -33,7 +34,7 @@ Rules:
 3. If a line contains direct speech, keep the speech compatible with the raw action.
 4. Each selected action must receive one corresponding narrated line.
 5. Keep the batch coherent: characters should feel like they share the same scene.
-6. Keep introduction prose concise, image-rich, and suitable for a Chinese xianxia game.
+6. Keep introduction prose concise, image-rich, and suitable for the supplied world setting.
 7. Never echo raw turn logs, actor ids, JSON keys, debug notes, or internal heuristic labels in the prose.
 8. Return strict JSON only.
 """
@@ -105,6 +106,7 @@ def _build_instruction(
     style_preset: str,
 ) -> str:
     payload = {
+        "world_context": world_context(state["plot"].get("world_setting")),
         "style_guidance": resolve_narration_style_guidance(style_preset),
         "scene": state["scene"],
         "scene_plan": state["scene_plan"],
@@ -154,6 +156,7 @@ def _build_intro_instruction(
 
     payload = {
         "task": f"{intro_kind}_introduction",
+        "world_context": world_context(state["plot"].get("world_setting")),
         "style_guidance": resolve_narration_style_guidance(style_preset),
         "player_profile": character_profiles.get(player_id, {}),
         "relevant_cast": {
@@ -182,7 +185,7 @@ def _build_intro_instruction(
         "transition_context": _build_transition_context(state),
         "constraints": [
             "Write 2 to 4 Chinese sentences.",
-            "Keep a xianxia register and third-person perspective.",
+            "Keep the supplied world's register and third-person perspective.",
             "Mention place, people, and immediate direction without inventing future outcomes.",
             "If `transition_context.afterglow_required` is true, open with 1 sentence acknowledging lingering pressure before introducing the new direction.",
             "Do not quote raw history arrays, turn ids, key:value pairs, or internal labels.",
