@@ -49,6 +49,7 @@ This project is indexed by GitNexus as **easy_game** (3337 symbols, 7156 relatio
 - Treat implementation and tests as the source of truth. README files and historical design documents provide background only.
 - Before editing, inspect `git status --short` and the focused diff. This worktree may contain unfinished, uncommitted features.
 - Never expose or copy values from `.env`, credentials, or database URLs.
+- Use Chinese for git commit messages, keeping a concise `type: subject` format.
 
 ## Architectural map
 
