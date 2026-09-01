@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import threading
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable
 
 from BaseAgent import BaseAgent
@@ -79,7 +80,62 @@ NARRATION_STYLE_DESCRIPTIONS = {
 WORLD_CHAT_SYSTEM_PROMPT = """You are a world-building assistant for a Chinese story game.
 Analyze the player's world description, confirm or refine it in concise Chinese, and summarize what has been captured.
 Never invent game rules as facts. Keep replies short and conversational.
-Do not output JSON; reply in plain Chinese text only."""
+Reply in Chinese. You may use simple Markdown (bold and bullet lists) for readability,
+but never output JSON or code fences."""
+
+
+def _is_usable_progression(value: Any) -> bool:
+    if not isinstance(value, dict):
+        return False
+    tiers = value.get("tiers")
+    return isinstance(tiers, list) and bool(tiers)
+
+
+def _is_usable_protagonist(value: Any) -> bool:
+    return isinstance(value, dict) and bool(str(value.get("name") or "").strip())
+
+
+def _default_world_progression(power_system: str) -> dict[str, Any]:
+    return {
+        "system_name": str(power_system or "").strip() or "境界",
+        "current_tier_index": 0,
+        "tiers": [
+            {"name": "入门", "advance_condition": {"type": "narrative"}},
+            {"name": "小成", "advance_condition": {"type": "narrative"}},
+            {"name": "大成", "advance_condition": {"type": "narrative"}},
+        ],
+    }
+
+
+def _default_world_protagonist(core_drive: str) -> dict[str, Any]:
+    return {
+        "character_id": "player",
+        "name": "无名修士",
+        "role": "protagonist",
+        "start_tier_index": 0,
+        "motivation": str(core_drive or "").strip() or "探索这个世界。",
+        "initial_relations": {},
+        "secrets": [],
+    }
+
+
+def _normalize_world_field_value(current_field: str, proposed: Any, draft: dict[str, Any]) -> Any:
+    if current_field == "progression" and not _is_usable_progression(proposed):
+        return _default_world_progression(str(draft.get("power_system") or ""))
+    if current_field == "protagonist" and not _is_usable_protagonist(proposed):
+        return _default_world_protagonist(str(draft.get("core_drive") or ""))
+    if current_field in {"key_characters", "factions_geography"} and not isinstance(proposed, list):
+        return []
+    return proposed
+
+
+def _normalize_world_field_patch(field_patch: Any, draft: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(field_patch, dict):
+        return {}
+    return {
+        field: _normalize_world_field_value(field, value, draft)
+        for field, value in field_patch.items()
+    }
 
 
 def _json_clone(value: Any) -> Any:
@@ -223,6 +279,7 @@ class WebGameSession:
         self._world_builder_agent: WorldBuilderAgent | None = None
         self._world_chat_agent: BaseAgent | None = None
         self._world_chat_history: list[dict[str, str]] = []
+        self._world_builder_draft_file = Path(__file__).resolve().parent / ".world_builder_draft.json"
         self._writer_review_draft: dict[str, Any] | None = None
         self.writer_review_pending = False
         self.writer_auto_approve = False
@@ -388,11 +445,66 @@ class WebGameSession:
     def get_world_setting_template(self, genre_tag: str) -> dict[str, Any]:
         return get_template(genre_tag)
 
-    def start_world_builder(self, genre_tag: str | None = None) -> dict[str, Any]:
+    def get_world_builder_draft_status(self) -> dict[str, Any]:
         with self._lock:
+            saved = self._load_world_builder_draft_unlocked()
+            if saved is None or saved.complete:
+                return {"exists": False}
+            view = saved.view()
+            return {
+                "exists": True,
+                "next_field": str(view.get("next_field") or ""),
+                "question": str(view.get("question") or ""),
+                "genre_tag": str((saved.draft or {}).get("genre_tag", "") or ""),
+            }
+
+    def start_world_builder(
+        self,
+        genre_tag: str | None = None,
+        *,
+        resume: bool = False,
+    ) -> dict[str, Any]:
+        with self._lock:
+            if resume:
+                saved = self._load_world_builder_draft_unlocked()
+                if saved is None:
+                    raise RuntimeError("没有未完成的世界观草稿。")
+                self._world_builder = saved
+                self._world_chat_history = []
+                return self._world_builder.view()
             self._world_builder = WorldBuilderWorkflow(genre_tag=genre_tag)
             self._world_chat_history = []
+            self._persist_world_builder_draft_unlocked()
             return self._world_builder.view()
+
+    def _persist_world_builder_draft_unlocked(self) -> None:
+        if self._world_builder is None or self._world_builder.complete:
+            try:
+                self._world_builder_draft_file.unlink(missing_ok=True)
+            except OSError:
+                pass
+            return
+        try:
+            tmp_file = self._world_builder_draft_file.with_suffix(".tmp")
+            tmp_file.write_text(
+                json.dumps(self._world_builder.to_snapshot(), ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            tmp_file.replace(self._world_builder_draft_file)
+        except OSError:
+            pass
+
+    def _load_world_builder_draft_unlocked(self) -> WorldBuilderWorkflow | None:
+        try:
+            data = json.loads(self._world_builder_draft_file.read_text(encoding="utf-8"))
+            if not isinstance(data, dict):
+                return None
+            workflow = WorldBuilderWorkflow.from_snapshot(data)
+            if not workflow.is_consistent():
+                return None
+            return workflow
+        except (OSError, ValueError, TypeError):
+            return None
 
     def answer_world_builder(
         self,
@@ -451,15 +563,17 @@ class WebGameSession:
             current_field = str(view.get("next_field") or "")
             current_question = str(view.get("question") or "")
             draft = view.get("draft") or {}
+            unconfirmed_fields = list(view.get("unconfirmed_fields") or [])
 
             chat_agent = self._world_chat_agent_instance()
             reply = str(
                 chat_agent.command(
                     instruction=(
-                        f"当前待确认项：{current_field}\n"
+                        f"当前最需要确认的是：{current_field}\n"
                         f"引导问题：{current_question}\n"
+                        f"尚未确认的字段：{', '.join(unconfirmed_fields)}\n"
                         f"玩家刚刚说：{message}\n"
-                        "请用简洁中文分析并确认玩家这一项的意思，必要时补一句追问；"
+                        "请用简洁中文分析并确认玩家提到的世界观信息，必要时补一句追问；"
                         "不要输出 JSON，只输出给玩家看的话。"
                     ),
                     history=self._world_chat_history,
@@ -469,32 +583,63 @@ class WebGameSession:
             ).strip()
 
             patch_agent = self._world_builder_agent_instance()
-            patch = patch_agent.command(
-                instruction=render_json_instruction(
-                    "Propose the value for exactly this one field, based on the user's message and the assistant reply. "
-                    "Return JSON with a single-key `field_patch` object keyed by `current_field`, an `options` list, "
-                    "and a `reference_query` string (a short search phrase when the user wants to reference an existing "
-                    "novel/template; otherwise an empty string).",
-                    {
-                        "current_field": current_field,
-                        "current_question": current_question,
-                        "current_value": draft.get(current_field),
-                        "draft": draft,
-                        "user_message": message,
-                        "assistant_reply": reply,
-                    },
-                ),
-                response_format="json",
-            )
 
-            proposed = self._extract_field_patch(patch, current_field)
+            def _patch_instruction(correction: str | None = None) -> str:
+                payload = {
+                    "next_field": current_field,
+                    "next_question": current_question,
+                    "unconfirmed_fields": unconfirmed_fields,
+                    "draft": draft,
+                    "user_message": message,
+                    "assistant_reply": reply,
+                }
+                instruction = (
+                    "Propose values for any unconfirmed fields the user just clarified. "
+                    "Return JSON with a `field_patch` object keyed by field name (one or more entries, only from "
+                    "`unconfirmed_fields`), an `options` list, "
+                    "and a `reference_query` string (a short search phrase when the user wants to reference an existing "
+                    "novel/template; otherwise an empty string)."
+                )
+                if correction:
+                    payload["correction"] = correction
+                    instruction += " Fix the previous attempt according to `correction`."
+                return render_json_instruction(instruction, payload)
+
+            patch = patch_agent.command(instruction=_patch_instruction(), response_format="json")
+            field_patch = self._extract_field_patch(patch)
+            field_patch = _normalize_world_field_patch(field_patch, draft)
+
+            last_error: Exception | None = None
             try:
-                self._world_builder.answer(proposed)
+                self._world_builder.apply_patch(field_patch)
             except Exception as exc:
-                raise RuntimeError(f"这一项还没被正确确认：{exc}") from exc
+                last_error = exc
+                for _ in range(2):
+                    try:
+                        patch = patch_agent.command(
+                            instruction=_patch_instruction(str(exc)),
+                            response_format="json",
+                        )
+                        field_patch = self._extract_field_patch(patch)
+                        field_patch = _normalize_world_field_patch(field_patch, draft)
+                        self._world_builder.apply_patch(field_patch)
+                        last_error = None
+                        break
+                    except Exception as retry_exc:
+                        last_error = retry_exc
 
             self._world_chat_history.append({"speaker": "user", "content": message})
             self._world_chat_history.append({"speaker": "assistant", "content": reply})
+
+            if last_error is not None:
+                self._persist_world_builder_draft_unlocked()
+                result = self._world_builder.view()
+                result["guidance"] = self._build_world_guidance_unlocked(
+                    current_field, current_question, last_error,
+                )
+                return result
+
+            self._persist_world_builder_draft_unlocked()
             view = self._world_builder.view()
 
             reference_query = (
@@ -532,22 +677,21 @@ class WebGameSession:
             except Exception:
                 passages = []
             self._world_builder.add_template_reference(int(template_id), passages)
+            self._persist_world_builder_draft_unlocked()
             return self._world_builder.view()
 
     @staticmethod
-    def _extract_field_patch(patch: Any, current_field: str) -> Any:
+    def _extract_field_patch(patch: Any) -> dict[str, Any]:
         if not isinstance(patch, dict):
             raise RuntimeError("Agent 没有返回可用的字段补丁。")
         field_patch = patch.get("field_patch")
-        if isinstance(field_patch, dict) and current_field in field_patch:
-            return field_patch[current_field]
-        if isinstance(field_patch, dict) and field_patch:
-            return next(iter(field_patch.values()))
-        raise RuntimeError("Agent 返回的字段补丁为空或缺少当前项。")
+        if not isinstance(field_patch, dict) or not field_patch:
+            raise RuntimeError("Agent 返回的字段补丁为空。")
+        return field_patch
 
     def _world_builder_agent_instance(self) -> WorldBuilderAgent:
         if self._world_builder_agent is None:
-            self._world_builder_agent = WorldBuilderAgent()
+            self._world_builder_agent = WorldBuilderAgent(timeout=120)
         return self._world_builder_agent
 
     def _world_chat_agent_instance(self) -> BaseAgent:
@@ -556,8 +700,32 @@ class WebGameSession:
                 system_prompt=WORLD_CHAT_SYSTEM_PROMPT,
                 temperature=0.7,
                 max_tokens=500,
+                timeout=120,
             )
         return self._world_chat_agent
+
+    def _build_world_guidance_unlocked(
+        self,
+        field: str,
+        question: str,
+        error: Exception,
+    ) -> str:
+        fallback = f"这一项暂时无法确认：{error}。请补充说明后重试。"
+        try:
+            guidance = str(
+                self._world_chat_agent_instance().command(
+                    instruction=(
+                        f"玩家在确认「{field}」时遇到校验问题：{error}\n"
+                        f"引导问题：{question}\n"
+                        "请用简洁中文向玩家解释问题，并引导玩家补充或修改信息；不要输出 JSON。"
+                    ),
+                    history=self._world_chat_history,
+                )
+                or ""
+            ).strip()
+            return guidance or fallback
+        except Exception:
+            return fallback
 
     def get_template_detail(self, template_id: int) -> dict[str, Any]:
         with self._lock:

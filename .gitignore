@@ -1,4 +1,5 @@
 .env
+.world_builder_draft.json
 .worktrees/
 .pytest_cache/
 .vendor/

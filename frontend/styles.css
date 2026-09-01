@@ -1508,10 +1508,16 @@ textarea {
 .world-chat-shell{max-width:640px;margin:0 auto;height:calc(100vh - 32px);min-height:0;display:flex;flex-direction:column;gap:12px}
 .world-chat-shell h2{margin:0}
 .world-chat-thread{flex:1 1 auto;min-height:160px;overflow-y:auto;display:flex;flex-direction:column;gap:8px;padding:8px}
-.world-chat-msg{padding:8px 12px;border-radius:10px;max-width:86%;white-space:pre-wrap}
+.world-chat-msg{padding:8px 12px;border-radius:10px;max-width:86%}
 .world-chat-msg.assistant{align-self:flex-start;background:#eef4f0;color:#16211d;border:1px solid var(--line)}
-.world-chat-msg.user{align-self:flex-end;background:#295d56;color:#ffffff}
+.world-chat-msg.user{align-self:flex-end;background:#295d56;color:#ffffff;white-space:pre-wrap}
 .world-chat-msg.system{align-self:center;background:transparent;color:var(--muted);font-size:12px;text-align:center;border:0}
+.world-chat-msg p{margin:0 0 6px}
+.world-chat-msg p:last-child{margin-bottom:0}
+.world-chat-msg ul,.world-chat-msg ol{margin:4px 0;padding-left:18px}
+.world-chat-msg code{background:rgba(0,0,0,.08);padding:1px 4px;border-radius:4px;font-family:var(--mono-font)}
+.world-chat-msg pre{background:rgba(0,0,0,.08);padding:8px;border-radius:6px;overflow-x:auto;margin:4px 0}
+.world-chat-msg pre code{background:transparent;padding:0}
 .world-chat-refs{display:flex;flex-wrap:wrap;gap:8px;flex:0 0 auto}
 .world-chat-ref{font-size:12px}
 .world-chat-composer{flex:0 0 auto}

@@ -57,6 +57,9 @@ class StageboundRequestHandler(BaseHTTPRequestHandler):
         if parsed.path == "/api/world-settings":
             self._write_json(HTTPStatus.OK, {"world_settings": self.server.session.list_world_settings()})
             return
+        if parsed.path == "/api/world-builder/draft":
+            self._write_json(HTTPStatus.OK, self.server.session.get_world_builder_draft_status())
+            return
         if parsed.path.startswith("/api/world-settings/"):
             tag = parsed.path.rsplit("/", 1)[-1]
             try:
@@ -290,6 +293,7 @@ class StageboundRequestHandler(BaseHTTPRequestHandler):
             raw_tag = payload.get("genre_tag")
             return HTTPStatus.OK, self.server.session.start_world_builder(
                 str(raw_tag) if raw_tag is not None else None,
+                resume=bool(payload.get("resume", False)),
             )
         if path == "/api/world-builder/answer":
             if "answer" not in payload:

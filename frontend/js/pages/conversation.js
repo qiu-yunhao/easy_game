@@ -8,6 +8,80 @@ function esc(value) {
   }[c]));
 }
 
+function inlineMarkdown(value) {
+  return String(value)
+    .replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, "$1<em>$2</em>")
+    .replace(/`([^`\n]+)`/g, "<code>$1</code>")
+    .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+}
+
+function markdownToHtml(text) {
+  const lines = String(text ?? "").replace(/\r\n?/g, "\n").split("\n");
+  const out = [];
+  let inCode = false;
+  let codeBuf = [];
+  let listBuf = [];
+  let listType = null;
+
+  const flushList = () => {
+    if (!listBuf.length) return;
+    const tag = listType === "ol" ? "ol" : "ul";
+    out.push(`<${tag}>${listBuf.map((li) => `<li>${li}</li>`).join("")}</${tag}>`);
+    listBuf = [];
+    listType = null;
+  };
+
+  for (const raw of lines) {
+    const line = raw.trim();
+
+    if (inCode) {
+      if (/^```/.test(line)) {
+        out.push(`<pre><code>${esc(codeBuf.join("\n"))}</code></pre>`);
+        codeBuf = [];
+        inCode = false;
+      } else {
+        codeBuf.push(raw);
+      }
+      continue;
+    }
+
+    if (/^```/.test(line)) {
+      flushList();
+      inCode = true;
+      continue;
+    }
+
+    if (/^#{1,6}\s+/.test(line)) {
+      flushList();
+      const level = (line.match(/^#+/) || [""])[0].length;
+      out.push(`<h${level}>${inlineMarkdown(esc(line.replace(/^#+\s+/, "")))}</h${level}>`);
+      continue;
+    }
+
+    if (/^([-*]|\d+[.)])\s+/.test(line)) {
+      const ordered = /^\d+[.)]\s+/.test(line);
+      const newType = ordered ? "ol" : "ul";
+      if (listType !== null && listType !== newType) flushList();
+      listType = newType;
+      listBuf.push(inlineMarkdown(esc(line.replace(/^([-*]|\d+[.)])\s+/, ""))));
+      continue;
+    }
+
+    if (!line) {
+      flushList();
+      continue;
+    }
+
+    flushList();
+    out.push(`<p>${inlineMarkdown(esc(raw))}</p>`);
+  }
+
+  flushList();
+  if (inCode) out.push(`<pre><code>${esc(codeBuf.join("\n"))}</code></pre>`);
+  return out.join("");
+}
+
 const DEFAULT_PROFILE = {
   gender: "未定",
   race: "人族",
@@ -22,51 +96,67 @@ const GENRE_LABELS = {
   infinite_flow: "无限流",
 };
 
+const REQUEST_TIMEOUT_MS = 120000;
+
 async function streamWorldChat(body, { onDelta, onDone } = {}) {
-  const response = await fetch("/api/world-builder/chat", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
-    body,
-  });
-  if (!response.ok || !response.body) {
-    let message = "请求失败。";
-    try { message = (await response.json()).error || message; } catch {}
-    throw new Error(message);
-  }
-
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-  let final = null;
-  const dispatch = (rawEvent) => {
-    const lines = rawEvent.split("\n");
-    let eventName = "message";
-    const dataLines = [];
-    for (const line of lines) {
-      if (line.startsWith("event:")) eventName = line.slice(6).trim();
-      else if (line.startsWith("data:")) dataLines.push(line.slice(5).trim());
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  try {
+    const response = await fetch("/api/world-builder/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
+      body,
+      signal: controller.signal,
+    });
+    if (!response.ok || !response.body) {
+      let message = "请求失败。";
+      try { message = (await response.json()).error || message; } catch {}
+      throw new Error(message);
     }
-    if (!dataLines.length) return;
-    let data;
-    try { data = JSON.parse(dataLines.join("\n")); } catch { return; }
-    if (eventName === "delta") { if (typeof onDelta === "function") onDelta(data.text || ""); }
-    else if (eventName === "done") { final = data; if (typeof onDone === "function") onDone(data); }
-    else if (eventName === "error") { throw new Error(data.error || "处理失败。"); }
-  };
 
-  for (;;) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    let idx;
-    while ((idx = buffer.indexOf("\n\n")) !== -1) {
-      const rawEvent = buffer.slice(0, idx);
-      buffer = buffer.slice(idx + 2);
-      dispatch(rawEvent);
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let final = null;
+    let finished = false;
+    const dispatch = (rawEvent) => {
+      const lines = rawEvent.split("\n");
+      let eventName = "message";
+      const dataLines = [];
+      for (const line of lines) {
+        if (line.startsWith("event:")) eventName = line.slice(6).trim();
+        else if (line.startsWith("data:")) dataLines.push(line.slice(5).trim());
+      }
+      if (!dataLines.length) return;
+      let data;
+      try { data = JSON.parse(dataLines.join("\n")); } catch { return; }
+      if (eventName === "delta") { if (typeof onDelta === "function") onDelta(data.text || ""); }
+      else if (eventName === "done") { final = data; finished = true; if (typeof onDone === "function") onDone(data); }
+      else if (eventName === "error") { throw new Error(data.error || "处理失败。"); }
+    };
+
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let idx;
+      while ((idx = buffer.indexOf("\n\n")) !== -1) {
+        const rawEvent = buffer.slice(0, idx);
+        buffer = buffer.slice(idx + 2);
+        dispatch(rawEvent);
+        if (finished) break;
+      }
+      if (finished) break;
     }
+    if (!finished && buffer.trim()) dispatch(buffer);
+    await reader.cancel().catch(() => {});
+    return final;
+  } catch (error) {
+    if (error?.name === "AbortError") throw new Error("世界观分析超过 120 秒，请重试。");
+    throw error;
+  } finally {
+    window.clearTimeout(timeoutId);
   }
-  if (buffer.trim()) dispatch(buffer);
-  return final;
 }
 
 export function renderConversation(el, { experienceMode = "game" } = {}) {
@@ -199,8 +289,14 @@ function renderNewGame(el, go, experienceMode) {
 
   (async () => {
     try {
-      const { world_settings } = await api.listWorldSettings();
-      genreSel.innerHTML = genreOptions(Array.isArray(world_settings) ? world_settings : []);
+      const [{ world_settings }, draft] = await Promise.all([
+        api.listWorldSettings(),
+        api.getWorldBuilderDraft().catch(() => ({ exists: false })),
+      ]);
+      const resumeOption = draft?.exists
+        ? `<option value="__resume__">继续完善上次的世界观（未完成）</option>`
+        : "";
+      genreSel.innerHTML = resumeOption + genreOptions(Array.isArray(world_settings) ? world_settings : []);
     } catch (e) {
       genreSel.innerHTML = genreOptions(
         Object.entries(GENRE_LABELS).map(([tag, title]) => ({ genre_tag: tag, title })),
@@ -228,7 +324,9 @@ function renderNewGame(el, go, experienceMode) {
         experience_mode: experienceMode,
         selected_template_id: appState.selectedTemplateId ?? null,
       };
-      const view = await api.startWorldBuilder(genreTag);
+      const view = genreTag === "__resume__"
+        ? await api.resumeWorldBuilder()
+        : await api.startWorldBuilder(genreTag);
       renderWorldChat(el, go, gameRequest, view);
     } catch (e) {
       startBtn.disabled = false;
@@ -269,7 +367,8 @@ function renderWorldChat(el, go, gameRequest, view) {
   const appendMsg = (role, text) => {
     const node = document.createElement("div");
     node.className = `world-chat-msg ${role}`;
-    node.textContent = text;
+    if (role === "user") node.textContent = text;
+    else node.innerHTML = markdownToHtml(text);
     thread.appendChild(node);
     thread.scrollTop = thread.scrollHeight;
     return node;
@@ -335,23 +434,26 @@ function renderWorldChat(el, go, gameRequest, view) {
     input.value = "";
     statusEl.textContent = "Agent 正在分析…";
     const bubble = appendMsg("assistant", "");
+    let rawBubble = "";
     try {
       await streamWorldChat(JSON.stringify({ message: text }), {
         onDelta: (chunk) => {
-          bubble.textContent += chunk;
+          rawBubble += chunk;
+          bubble.innerHTML = markdownToHtml(rawBubble);
           thread.scrollTop = thread.scrollHeight;
         },
         onDone: (data) => {
           latestView = data?.view || latestView;
           sync();
-          if (latestView?.question) appendMsg("system", latestView.question);
+          if (latestView?.guidance) appendMsg("system", latestView.guidance);
+          else if (latestView?.question) appendMsg("system", latestView.question);
           renderRefs();
         },
       });
       statusEl.textContent = "";
       msgEl.textContent = "";
     } catch (e) {
-      if (!bubble.textContent) bubble.textContent = e.message;
+      if (!rawBubble) bubble.textContent = e.message;
       statusEl.textContent = "";
       msgEl.textContent = e.message;
     } finally {
