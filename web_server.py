@@ -41,6 +41,12 @@ class StageboundRequestHandler(BaseHTTPRequestHandler):
         if parsed.path == "/api/state":
             self._write_json(HTTPStatus.OK, self.server.session.get_state())
             return
+        if parsed.path == "/api/writer-review":
+            try:
+                self._write_json(HTTPStatus.OK, self.server.session.get_writer_review())
+            except RuntimeError as exc:
+                self._write_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
+            return
         if parsed.path == "/api/players":
             user_id = self._as_int(parse_qs(parsed.query).get("user_id", [None])[0], field_name="user_id")
             self._write_json(HTTPStatus.OK, {"players": self.server.session.list_players_for_user(user_id)})
@@ -76,6 +82,12 @@ class StageboundRequestHandler(BaseHTTPRequestHandler):
         if parsed.path == "/api/action" and self._wants_event_stream():
             self._handle_action_stream(parsed.path, started_at)
             return
+        if parsed.path == "/api/auto/step" and self._wants_event_stream():
+            self._handle_auto_step_stream(parsed.path, started_at)
+            return
+        if parsed.path == "/api/world-builder/chat" and self._wants_event_stream():
+            self._handle_world_builder_chat_stream(parsed.path, started_at)
+            return
         try:
             status, payload = self._handle_post_api_request(parsed.path, self._read_json_body())
         except RuntimeError as exc:
@@ -96,15 +108,7 @@ class StageboundRequestHandler(BaseHTTPRequestHandler):
             self._write_error_with_log(path, HTTPStatus.BAD_REQUEST, exc, started_at, label="请求失败")
             return
 
-        try:
-            self.send_response(HTTPStatus.OK)
-            self.send_header("Content-Type", "text/event-stream; charset=utf-8")
-            self.send_header("Cache-Control", "no-store")
-            self.send_header("Connection", "keep-alive")
-            self.send_header("X-Accel-Buffering", "no")
-            self.end_headers()
-        except (BrokenPipeError, ConnectionAbortedError, ConnectionResetError, OSError):
-            print("[Stagebound] 客户端在流开始前中断了连接。", flush=True)
+        if not self._begin_event_stream():
             return
 
         def emit(entry: dict[str, Any]) -> None:
@@ -124,6 +128,80 @@ class StageboundRequestHandler(BaseHTTPRequestHandler):
         self._write_sse_event("done", final_state)
         elapsed_ms = int((time.perf_counter() - started_at) * 1000)
         print(f"[Stagebound] 已完成流式 {path}，耗时 {elapsed_ms}ms", flush=True)
+
+    def _handle_auto_step_stream(self, path: str, started_at: float) -> None:
+        try:
+            payload = self._read_json_body()
+            max_beats = self._parse_max_beats(payload)
+        except RuntimeError as exc:
+            self._write_error_with_log(path, HTTPStatus.BAD_REQUEST, exc, started_at, label="请求失败")
+            return
+
+        if not self._begin_event_stream():
+            return
+
+        def emit(entry: dict[str, Any]) -> None:
+            self._write_sse_event("entry", entry)
+
+        try:
+            final_state = self.server.session.auto_step_streaming(emit, max_beats=max_beats)
+        except Exception as exc:
+            self._write_sse_event("error", {"error": str(exc)})
+            elapsed_ms = int((time.perf_counter() - started_at) * 1000)
+            print(f"[Stagebound] 流式自动推进失败：{path} -> {exc}，耗时 {elapsed_ms}ms", flush=True)
+            return
+
+        self._write_sse_event("done", final_state)
+        elapsed_ms = int((time.perf_counter() - started_at) * 1000)
+        print(f"[Stagebound] 已完成流式 {path}，耗时 {elapsed_ms}ms", flush=True)
+
+    def _handle_world_builder_chat_stream(self, path: str, started_at: float) -> None:
+        try:
+            payload = self._read_json_body()
+            message = str(payload.get("message", "") or "")
+        except RuntimeError as exc:
+            self._write_error_with_log(path, HTTPStatus.BAD_REQUEST, exc, started_at, label="请求失败")
+            return
+
+        if not self._begin_event_stream():
+            return
+
+        def emit_delta(text: str) -> None:
+            self._write_sse_event("delta", {"text": text})
+
+        try:
+            view = self.server.session.world_builder_chat_streaming(message, emit_delta)
+        except Exception as exc:
+            self._write_sse_event("error", {"error": str(exc)})
+            elapsed_ms = int((time.perf_counter() - started_at) * 1000)
+            print(f"[Stagebound] 世界观聊天失败：{path} -> {exc}，耗时 {elapsed_ms}ms", flush=True)
+            return
+
+        self._write_sse_event("done", {"view": view})
+        elapsed_ms = int((time.perf_counter() - started_at) * 1000)
+        print(f"[Stagebound] 已完成流式 {path}，耗时 {elapsed_ms}ms", flush=True)
+
+    def _begin_event_stream(self) -> bool:
+        try:
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Connection", "keep-alive")
+            self.send_header("X-Accel-Buffering", "no")
+            self.end_headers()
+        except (BrokenPipeError, ConnectionAbortedError, ConnectionResetError, OSError):
+            print("[Stagebound] 客户端在流开始前中断了连接。", flush=True)
+            return False
+        return True
+
+    @staticmethod
+    def _parse_max_beats(payload: dict[str, Any]) -> int:
+        raw_beats = payload.get("max_beats", 4)
+        try:
+            max_beats = int(raw_beats)
+        except (TypeError, ValueError):
+            raise RuntimeError("`max_beats` 必须是整数。") from None
+        return max(1, min(8, max_beats))
 
     def _write_sse_event(self, event: str, data: dict[str, Any]) -> None:
         body = f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
@@ -198,13 +276,14 @@ class StageboundRequestHandler(BaseHTTPRequestHandler):
             enabled = bool(payload.get("enabled", False))
             return HTTPStatus.OK, self.server.session.set_auto_mode(enabled)
         if path == "/api/auto/step":
-            raw_beats = payload.get("max_beats", 4)
-            try:
-                max_beats = int(raw_beats)
-            except (TypeError, ValueError):
-                raise RuntimeError("`max_beats` 必须是整数。") from None
-            max_beats = max(1, min(8, max_beats))
+            max_beats = self._parse_max_beats(payload)
             return HTTPStatus.OK, self.server.session.auto_step(max_beats=max_beats)
+        if path == "/api/writer-review/approve":
+            return HTTPStatus.OK, self.server.session.approve_writer_review(payload.get("draft"))
+        if path == "/api/writer-review/rewrite":
+            return HTTPStatus.OK, self.server.session.rewrite_writer_review(
+                payload.get("draft"), str(payload.get("guidance", "") or ""),
+            )
         if path == "/api/reset":
             return HTTPStatus.OK, self.server.session.reset(**self._build_reset_kwargs(payload))
         if path == "/api/world-builder/start":
@@ -223,8 +302,20 @@ class StageboundRequestHandler(BaseHTTPRequestHandler):
             )
         if path == "/api/world-builder/apply":
             return HTTPStatus.OK, self.server.session.apply_world_builder()
+        if path == "/api/world-builder/chat":
+            message = str(payload.get("message", "") or "")
+            view = self.server.session.world_builder_chat_streaming(message, lambda _text: None)
+            return HTTPStatus.OK, {"view": view}
+        if path == "/api/world-builder/reference":
+            template_id = self._as_int(payload.get("template_id"), field_name="template_id")
+            view = self.server.session.world_builder_add_reference(
+                template_id, str(payload.get("reference_query", "") or ""),
+            )
+            return HTTPStatus.OK, {"view": view}
         if path == "/api/new-game":
             user_id = self._as_int(payload.get("user_id"), field_name="user_id")
+            if not isinstance(payload.get("world_setting"), dict):
+                raise RuntimeError("新建存档必须先完成世界观完善。")
             starter_story_templates = payload.get("starter_story_templates")
             if starter_story_templates is not None and not isinstance(starter_story_templates, list):
                 raise RuntimeError("`starter_story_templates` 必须是一个 JSON 数组。")
@@ -294,6 +385,7 @@ class StageboundRequestHandler(BaseHTTPRequestHandler):
             ),
             "world_setting": world_setting,
             "genre_tag": str(value) if (value := payload.get("genre_tag")) is not None else None,
+            "experience_mode": str(value) if (value := payload.get("experience_mode")) is not None else None,
         }
 
     def _as_int(self, value: Any, *, field_name: str) -> int:

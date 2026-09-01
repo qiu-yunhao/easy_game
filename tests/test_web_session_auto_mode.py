@@ -120,6 +120,82 @@ class AutoStepTest(unittest.TestCase):
             session.auto_step()
 
 
+class AutoStepStreamingTest(unittest.TestCase):
+    def test_streaming_passes_on_event_to_advance(self):
+        session = _session()
+        session.set_auto_mode(True)
+        captured = {}
+
+        def _fake_advance(state, *, stop_when, max_beats=None, max_hops=24, stop_on_chapter_end=False, on_event=None):
+            captured["stop_when"] = stop_when
+            captured["max_beats"] = max_beats
+            captured["on_event"] = on_event
+            return state, "已自动推进 3 拍。"
+
+        sink = []
+        with patch.object(session._controller, "advance", _fake_advance):
+            result = session.auto_step_streaming(sink.append, max_beats=3)
+
+        from Graph.conversation_controller import never_stop
+        self.assertIs(captured["stop_when"], never_stop)
+        self.assertEqual(captured["max_beats"], 3)
+        # advance 拿到的是一个可调用的 emitter(而非 None),流式才成立。
+        self.assertTrue(callable(captured["on_event"]))
+        self.assertEqual(result["handoff_reason"], "已自动推进 3 拍。")
+
+    def test_streaming_raises_when_auto_not_enabled(self):
+        session = _session()
+        with self.assertRaises(RuntimeError):
+            session.auto_step_streaming(lambda _entry: None)
+
+
+class AutoStepAutosaveTest(unittest.TestCase):
+    def test_autosave_fires_when_save_context_bound(self):
+        session = _session()
+        session.set_auto_mode(True)
+        session.save_store = object()  # 非 None 即视为已配置存储
+        session.active_user_id = 7
+        session.active_player_id = 42
+
+        with patch.object(session._controller, "advance", lambda state, **_k: (state, "ok")), \
+                patch.object(session, "_save_player_session_unlocked") as save_mock:
+            session.auto_step(max_beats=2)
+
+        save_mock.assert_called_once()
+        _, kwargs = save_mock.call_args
+        self.assertEqual(kwargs.get("user_id"), 7)
+        self.assertEqual(kwargs.get("player_id"), 42)
+        self.assertEqual(kwargs.get("save_kind"), "auto")
+
+    def test_autosave_skipped_when_no_save_context(self):
+        session = _session()
+        session.set_auto_mode(True)
+        # 未绑定 user/player → 不应尝试存档。
+        self.assertIsNone(session.active_user_id)
+
+        with patch.object(session._controller, "advance", lambda state, **_k: (state, "ok")), \
+                patch.object(session, "_save_player_session_unlocked") as save_mock:
+            session.auto_step(max_beats=2)
+
+        save_mock.assert_not_called()
+
+    def test_autosave_failure_does_not_break_advance(self):
+        session = _session()
+        session.set_auto_mode(True)
+        session.save_store = object()
+        session.active_user_id = 1
+        session.active_player_id = 2
+
+        def _boom(**_k):
+            raise RuntimeError("db down")
+
+        with patch.object(session._controller, "advance", lambda state, **_k: (state, "ok")), \
+                patch.object(session, "_save_player_session_unlocked", _boom):
+            # autosave 抛错被吞掉,auto_step 仍正常返回。
+            result = session.auto_step(max_beats=2)
+        self.assertIn("handoff_reason", result)
+
+
 class ExportSnapshotDuringAutoTest(unittest.TestCase):
     def test_export_while_auto_normalizes_player_to_manual(self):
         # 自动模式开着时导出快照:player.enabled 归 True、auto_mode 归 False;

@@ -20,6 +20,7 @@ from WorldSetting.infinite_flow_preset import build_infinite_flow_world_setting
 from WorldSetting.genre_factory import get_template, list_genres
 from WorldSetting.runtime import chapter_tier_sequence, tier_pair, transition_requirement, world_context
 from WorldSetting.builder import WorldBuilderWorkflow
+from WorldSetting.additions import append_world_additions
 
 __all__ = [
     "ADVANCE_CONDITION_TYPES",
@@ -33,6 +34,7 @@ __all__ = [
     "WorldBuilderWorkflow",
     "WorldSettingError",
     "apply_world_setting",
+    "append_world_additions",
     "build_advance_condition",
     "build_empty_world_setting",
     "build_tier",

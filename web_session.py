@@ -5,15 +5,19 @@ import threading
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Callable
 
+from BaseAgent import BaseAgent
 from CharacterRosterTools import CharacterRosterToolRuntime
 from CharacterProfile import ensure_character_profile, ensure_character_profiles
 from CharacterRepository import CharacterRepository
+from PromptUtils import render_json_instruction
 from Graph.builder import (
     initialize_story_session,
+    prepare_chapter_draft,
     prepare_chapter_turn,
     prepare_story_setup,
     resolve_story_turn,
 )
+from Graph.story_planning import apply_writer_review_package
 from Graph.beat_subgraph import is_player_turn
 from Graph.conversation_controller import (
     ConversationController,
@@ -43,7 +47,16 @@ from session_bootstrap import (
     build_graph_dependencies,
     warm_model_clients,
 )
-from WorldSetting import WorldBuilderWorkflow, apply_world_setting, get_template, list_genres, validate_world_setting, world_context
+from WorldSetting import (
+    WorldBuilderWorkflow,
+    append_world_additions,
+    apply_world_setting,
+    get_template,
+    list_genres,
+    validate_world_setting,
+    world_context,
+)
+from WorldSetting.WorldBuilderAgent import WorldBuilderAgent
 
 if TYPE_CHECKING:
     from Persistence.Store import GameSaveStore
@@ -62,6 +75,11 @@ NARRATION_STYLE_DESCRIPTIONS = {
     "light_novel": "轻快、清晰，情绪和动作都更直观。",
     "epic": "庄重、宏阔，强调史诗感但不额外虚构。",
 }
+
+WORLD_CHAT_SYSTEM_PROMPT = """You are a world-building assistant for a Chinese story game.
+Analyze the player's world description, confirm or refine it in concise Chinese, and summarize what has been captured.
+Never invent game rules as facts. Keep replies short and conversational.
+Do not output JSON; reply in plain Chinese text only."""
 
 
 def _json_clone(value: Any) -> Any:
@@ -190,15 +208,24 @@ class SessionConfig:
     narration_style_preset: str = DEFAULT_NARRATION_STYLE_PRESET
     selected_template_id: int | None = None
     world_setting: dict[str, Any] | None = None
+    experience_mode: str = "game"  # "game" | "assistant"; immutable for a running story
 
 
 class WebGameSession:
     def __init__(self, config: SessionConfig | None = None) -> None:
         self.config = config or SessionConfig()
+        if self.config.experience_mode not in {"game", "assistant"}:
+            raise ValueError("experience_mode 必须是 `game` 或 `assistant`。")
         self.config.narration_style_preset = resolve_narration_style_preset(self.config.narration_style_preset)
         self._lock = threading.Lock()
         self._story_template_service = None
         self._world_builder: WorldBuilderWorkflow | None = None
+        self._world_builder_agent: WorldBuilderAgent | None = None
+        self._world_chat_agent: BaseAgent | None = None
+        self._world_chat_history: list[dict[str, str]] = []
+        self._writer_review_draft: dict[str, Any] | None = None
+        self.writer_review_pending = False
+        self.writer_auto_approve = False
         self.selected_template_id: int | None = self.config.selected_template_id
         self._player_interface = BufferedPlayerInterface()
         self.save_store: GameSaveStore | None = None
@@ -224,6 +251,7 @@ class WebGameSession:
         selected_template_id: int | None = None,
         world_setting: dict[str, Any] | None = None,
         genre_tag: str | None = None,
+        experience_mode: str | None = None,
     ) -> dict[str, Any]:
         with self._lock:
             if world_setting is not None and genre_tag is not None:
@@ -233,6 +261,10 @@ class WebGameSession:
             if world_setting is not None:
                 validate_world_setting(world_setting)
                 self.config.world_setting = _json_clone(world_setting)
+            if experience_mode is not None:
+                if experience_mode not in {"game", "assistant"}:
+                    raise RuntimeError("`experience_mode` 必须是 `game` 或 `assistant`。")
+                self.config.experience_mode = experience_mode
             for field, value in (
                 ("mode", mode),
                 ("player_character", player_character),
@@ -359,6 +391,7 @@ class WebGameSession:
     def start_world_builder(self, genre_tag: str | None = None) -> dict[str, Any]:
         with self._lock:
             self._world_builder = WorldBuilderWorkflow(genre_tag=genre_tag)
+            self._world_chat_history = []
             return self._world_builder.view()
 
     def answer_world_builder(
@@ -397,6 +430,134 @@ class WebGameSession:
             self.last_handoff_reason = "世界设定已确认，正在重建开场场景。"
             self._rebuild_session(initialize_story=True)
             return self.serialize_state()
+
+    def world_builder_chat_streaming(
+        self,
+        message: str,
+        on_delta: Callable[[str], None],
+    ) -> dict[str, Any]:
+        """Chat with the world-builder Agent, streaming its reply, then advance the draft."""
+        with self._lock:
+            message = str(message or "").strip()
+            if not message:
+                raise RuntimeError("请输入世界观描述。")
+            if self._world_builder is None:
+                self._world_builder = WorldBuilderWorkflow()
+                self._world_chat_history = []
+            if self._world_builder.complete:
+                raise RuntimeError("世界观已经完善，请直接创建存档。")
+
+            view = self._world_builder.view()
+            current_field = str(view.get("next_field") or "")
+            current_question = str(view.get("question") or "")
+            draft = view.get("draft") or {}
+
+            chat_agent = self._world_chat_agent_instance()
+            reply = str(
+                chat_agent.command(
+                    instruction=(
+                        f"当前待确认项：{current_field}\n"
+                        f"引导问题：{current_question}\n"
+                        f"玩家刚刚说：{message}\n"
+                        "请用简洁中文分析并确认玩家这一项的意思，必要时补一句追问；"
+                        "不要输出 JSON，只输出给玩家看的话。"
+                    ),
+                    history=self._world_chat_history,
+                    on_token=on_delta,
+                )
+                or ""
+            ).strip()
+
+            patch_agent = self._world_builder_agent_instance()
+            patch = patch_agent.command(
+                instruction=render_json_instruction(
+                    "Propose the value for exactly this one field, based on the user's message and the assistant reply. "
+                    "Return JSON with a single-key `field_patch` object keyed by `current_field`, an `options` list, "
+                    "and a `reference_query` string (a short search phrase when the user wants to reference an existing "
+                    "novel/template; otherwise an empty string).",
+                    {
+                        "current_field": current_field,
+                        "current_question": current_question,
+                        "current_value": draft.get(current_field),
+                        "draft": draft,
+                        "user_message": message,
+                        "assistant_reply": reply,
+                    },
+                ),
+                response_format="json",
+            )
+
+            proposed = self._extract_field_patch(patch, current_field)
+            try:
+                self._world_builder.answer(proposed)
+            except Exception as exc:
+                raise RuntimeError(f"这一项还没被正确确认：{exc}") from exc
+
+            self._world_chat_history.append({"speaker": "user", "content": message})
+            self._world_chat_history.append({"speaker": "assistant", "content": reply})
+            view = self._world_builder.view()
+
+            reference_query = (
+                str(patch.get("reference_query") or "").strip()
+                if isinstance(patch, dict)
+                else ""
+            )
+            if reference_query and self._story_template_service is not None:
+                view["reference_query"] = reference_query
+                try:
+                    view["reference_candidates"] = self._story_template_service.search_template_passages(
+                        reference_query, top_k=6,
+                    )
+                except Exception:
+                    view["reference_candidates"] = []
+            return view
+
+    def world_builder_add_reference(
+        self,
+        template_id: int,
+        reference_query: str = "",
+    ) -> dict[str, Any]:
+        """Add a confirmed template reference to the in-progress world draft."""
+        with self._lock:
+            if self._world_builder is None or self._world_builder.complete:
+                raise RuntimeError("世界设定尚未开始或已完成，不能添加参考。")
+            if self._story_template_service is None:
+                raise RuntimeError("情节模板服务未配置，无法添加参考。")
+            query = str(reference_query or "").strip() or str(self._world_builder.view().get("question", "") or "")
+            passages: list[str] = []
+            try:
+                passages = self._story_template_service.search_style_passages(
+                    int(template_id), query=query, top_k=2,
+                )
+            except Exception:
+                passages = []
+            self._world_builder.add_template_reference(int(template_id), passages)
+            return self._world_builder.view()
+
+    @staticmethod
+    def _extract_field_patch(patch: Any, current_field: str) -> Any:
+        if not isinstance(patch, dict):
+            raise RuntimeError("Agent 没有返回可用的字段补丁。")
+        field_patch = patch.get("field_patch")
+        if isinstance(field_patch, dict) and current_field in field_patch:
+            return field_patch[current_field]
+        if isinstance(field_patch, dict) and field_patch:
+            return next(iter(field_patch.values()))
+        raise RuntimeError("Agent 返回的字段补丁为空或缺少当前项。")
+
+    def _world_builder_agent_instance(self) -> WorldBuilderAgent:
+        if self._world_builder_agent is None:
+            self._world_builder_agent = WorldBuilderAgent()
+        return self._world_builder_agent
+
+    def _world_chat_agent_instance(self) -> BaseAgent:
+        if self._world_chat_agent is None:
+            self._world_chat_agent = BaseAgent(
+                system_prompt=WORLD_CHAT_SYSTEM_PROMPT,
+                temperature=0.7,
+                max_tokens=500,
+            )
+        return self._world_chat_agent
 
     def get_template_detail(self, template_id: int) -> dict[str, Any]:
         with self._lock:
@@ -475,7 +636,7 @@ class WebGameSession:
     def _export_runtime_snapshot_unlocked(self) -> dict[str, Any]:
         state = _json_clone(self.state)
         profiles = _json_clone(_profiles_as_dict(self.character_profiles))
-        if self.auto_mode and isinstance(state.get("player"), dict):
+        if self.auto_mode and not self._is_assistant_mode() and isinstance(state.get("player"), dict):
             # 存档只落地正常游玩态:把临时自动叠加还原为手动态。档案未被篡改,无需还原 agent_type。
             state["player"]["enabled"] = True
             state["player"]["auto_mode"] = False
@@ -487,6 +648,10 @@ class WebGameSession:
                 "story_initialized": self.story_initialized,
                 "last_handoff_reason": self.last_handoff_reason,
                 "world_setting": _json_clone(self.config.world_setting),
+                "experience_mode": self.config.experience_mode,
+                "writer_review_pending": self.writer_review_pending,
+                "writer_review_draft": _json_clone(self._writer_review_draft),
+                "writer_auto_approve": self.writer_auto_approve,
             },
             "state": state,
             "character_profiles": profiles,
@@ -517,6 +682,11 @@ class WebGameSession:
         self.config.narration_style_preset = resolve_narration_style_preset(
             str(session_meta.get("narration_style_preset") or self.config.narration_style_preset or DEFAULT_NARRATION_STYLE_PRESET)
         )
+        loaded_setting = session_meta.get("world_setting")
+        self.config.world_setting = _json_clone(loaded_setting) if isinstance(loaded_setting, dict) else None
+        self.config.experience_mode = str(session_meta.get("experience_mode") or "game")
+        if self.config.experience_mode not in {"game", "assistant"}:
+            raise RuntimeError("存档包含未知的体验模式。")
         self.character_profiles = ensure_character_profiles(
             character_profiles,
             player_character_id=self.config.player_character or PLAYER_CHARACTER_ID,
@@ -529,15 +699,202 @@ class WebGameSession:
         self.config.selected_template_id = self.selected_template_id
         self.last_handoff_reason = str(session_meta.get("last_handoff_reason") or "已从数据库存档恢复。")
         self._reset_auto_mode_flags_unlocked()
+        pending_draft = session_meta.get("writer_review_draft")
+        self._writer_review_draft = _json_clone(pending_draft) if isinstance(pending_draft, dict) else None
+        self.writer_review_pending = bool(session_meta.get("writer_review_pending", False)) and self._writer_review_draft is not None
+        self.writer_auto_approve = bool(session_meta.get("writer_auto_approve", False))
+        if self._is_assistant_mode():
+            self._set_assistant_player_unlocked()
         return self.serialize_state()
 
     def set_auto_mode(self, enabled: bool) -> dict[str, Any]:
         with self._lock:
+            if self._is_assistant_mode():
+                self.writer_auto_approve = enabled
+            if enabled and self.writer_review_pending:
+                # 助手模式的“自动”表示不拦截编剧草稿，直接采用当前版本。
+                self._approve_writer_review_unlocked(self._writer_review_draft or {})
             if enabled and not self.auto_mode:
                 self._enable_auto_unlocked()
             elif not enabled and self.auto_mode:
                 self._disable_auto_unlocked()
             return self.serialize_state()
+
+    def _is_assistant_mode(self) -> bool:
+        return self.config.experience_mode == "assistant"
+
+    def _set_assistant_player_unlocked(self) -> None:
+        """助手模式永远不把主角回合交给文本输入框。"""
+        self.state = {
+            **self.state,
+            "player": {**self.state["player"], "enabled": False, "auto_mode": True},
+        }
+
+    def _review_draft_from_state_unlocked(self) -> dict[str, Any]:
+        plot, runtime = self.state["plot"], self.state["runtime"]
+        return {
+            "story_premise": {
+                "story_premise": str(plot.get("story_premise", "") or ""),
+                "exploration_drive": str(plot.get("exploration_drive", "") or ""),
+            },
+            "story_outline": _json_clone(list(plot.get("story_outline", []) or [])),
+            "chapter_expansion": {
+                "chapter_title": str(plot.get("current_chapter_title", "") or ""),
+                "chapter_goal": str(plot.get("chapter_goal", "") or ""),
+                "chapter_overview": str(plot.get("current_chapter_overview", "") or ""),
+                "exploration_hooks": _json_clone(list(plot.get("current_chapter_hooks", []) or [])),
+                "key_locations": _json_clone(
+                    next(
+                        (
+                            item.get("key_locations", [])
+                            for item in plot.get("story_outline", [])
+                            if isinstance(item, dict)
+                            and str(item.get("chapter_id", "") or "") == str(plot.get("chapter_id", "") or "")
+                        ),
+                        [],
+                    )
+                ),
+            },
+            "scene_candidates": _json_clone(list(runtime.get("scene_candidates", []) or [])),
+            "world_additions": {"facts": [], "locations": []},
+        }
+
+    @staticmethod
+    def _require_review_draft(draft: Any) -> dict[str, Any]:
+        if not isinstance(draft, dict):
+            raise RuntimeError("`draft` 必须是编剧工作台导出的对象。")
+        premise = draft.get("story_premise")
+        outline = draft.get("story_outline")
+        chapter = draft.get("chapter_expansion")
+        candidates = draft.get("scene_candidates")
+        if not isinstance(premise, dict) or not all(str(premise.get(key, "") or "").strip() for key in ("story_premise", "exploration_drive")):
+            raise RuntimeError("故事前提必须包含 story_premise 和 exploration_drive。")
+        if not isinstance(outline, list) or not outline:
+            raise RuntimeError("章节大纲不能为空。")
+        if any(
+            not isinstance(item, dict)
+            or not all(str(item.get(key, "") or "").strip() for key in ("chapter_id", "title", "main_goal", "summary"))
+            for item in outline
+        ):
+            raise RuntimeError("每个章节大纲必须包含 chapter_id、title、main_goal 和 summary。")
+        if not isinstance(chapter, dict) or not all(str(chapter.get(key, "") or "").strip() for key in ("chapter_title", "chapter_goal", "chapter_overview")):
+            raise RuntimeError("章节展开缺少标题、目标或概述。")
+        if not isinstance(chapter.get("exploration_hooks"), list) or not isinstance(chapter.get("key_locations"), list):
+            raise RuntimeError("章节展开的 hooks 和 key_locations 必须是数组。")
+        if not isinstance(candidates, list) or not candidates:
+            raise RuntimeError("场景候选不能为空。")
+        if any(
+            not isinstance(item, dict)
+            or not all(str(item.get(key, "") or "").strip() for key in ("candidate_id", "location_id", "beat", "scene_goal", "exit_condition"))
+            for item in candidates
+        ):
+            raise RuntimeError("每个场景候选必须包含标识、地点、节拍、目标和退出条件。")
+        additions = draft.get("world_additions", {})
+        if additions is not None and (
+            not isinstance(additions, dict)
+            or any(not isinstance(additions.get(key, []), list) for key in ("facts", "locations"))
+        ):
+            raise RuntimeError("world_additions 必须包含 facts 和 locations 数组。")
+        return _json_clone(draft)
+
+    def _apply_review_draft_unlocked(self, draft: dict[str, Any]) -> None:
+        draft = self._require_review_draft(draft)
+        self.state = apply_writer_review_package(self.state, self.deps, draft)
+        additions = dict(draft.get("world_additions") or {})
+        additions.setdefault("locations", list(draft["chapter_expansion"].get("key_locations", []) or []))
+        additions.setdefault("facts", list(draft["chapter_expansion"].get("exploration_hooks", []) or []))
+        setting = self.state["plot"].get("world_setting") or self.config.world_setting
+        if isinstance(setting, dict):
+            setting = append_world_additions(setting, additions)
+            self.config.world_setting = _json_clone(setting)
+            self.state = {**self.state, "plot": {**self.state["plot"], "world_setting": setting}}
+
+    def _stage_writer_review_unlocked(self) -> None:
+        self.state = prepare_chapter_draft(self.state, self.deps)
+        review_context = self.state["plot"].get("writer_review_context")
+        if review_context is not None:
+            cleaned_plot = dict(self.state["plot"])
+            cleaned_plot.pop("writer_review_context", None)
+            self.state = {**self.state, "plot": cleaned_plot}
+        self._writer_review_draft = self._review_draft_from_state_unlocked()
+        self.writer_review_pending = True
+        self.state = {**self.state, "runtime": {**self.state["runtime"], "next_act": None}}
+        self.last_handoff_reason = "编剧方案已生成，等待在写作工作台审阅。"
+
+    def _persist_generated_world_additions_unlocked(self) -> None:
+        """Automatic paths still commit PlayerWriter's locations and hooks to world state."""
+        if self.writer_review_pending:
+            return
+        setting = self.state["plot"].get("world_setting")
+        if not isinstance(setting, dict):
+            return
+        draft = self._review_draft_from_state_unlocked()
+        self.config.world_setting = append_world_additions(
+            setting,
+            {
+                "locations": draft["chapter_expansion"].get("key_locations", []),
+                "facts": draft["chapter_expansion"].get("exploration_hooks", []),
+            },
+        )
+        self.state = {
+            **self.state,
+            "plot": {**self.state["plot"], "world_setting": _json_clone(self.config.world_setting)},
+        }
+
+    def _require_writer_review_resolved_unlocked(self) -> None:
+        if self.writer_review_pending:
+            raise RuntimeError("编剧方案尚待审阅，请先通过或重新加工。")
+
+    def get_writer_review(self) -> dict[str, Any]:
+        with self._lock:
+            if not self.writer_review_pending or self._writer_review_draft is None:
+                raise RuntimeError("当前没有待审阅的编剧方案。")
+            return {"draft": _json_clone(self._writer_review_draft), "state": self.serialize_state()}
+
+    def _approve_writer_review_unlocked(self, draft: dict[str, Any]) -> None:
+        self._apply_review_draft_unlocked(draft)
+        self._writer_review_draft = None
+        self.writer_review_pending = False
+        self.state = prepare_chapter_turn(self.state, self.deps)
+        self._set_assistant_player_unlocked()
+        self._enable_auto_unlocked()
+        self.last_handoff_reason = "编剧方案已确认，已交给导演 Agent 调度。"
+
+    def approve_writer_review(self, draft: dict[str, Any]) -> dict[str, Any]:
+        with self._lock:
+            if not self.writer_review_pending:
+                raise RuntimeError("当前没有待审阅的编剧方案。")
+            self._approve_writer_review_unlocked(draft)
+            return self.serialize_state()
+
+    def rewrite_writer_review(self, draft: dict[str, Any], guidance: str) -> dict[str, Any]:
+        with self._lock:
+            if not self.writer_review_pending:
+                raise RuntimeError("当前没有待审阅的编剧方案。")
+            guidance = str(guidance or "").strip()
+            if not guidance:
+                raise RuntimeError("请先填写给编剧 Agent 的修改要求。")
+            draft = self._require_review_draft(draft)
+            # 将用户现稿和意图放进既有 PlayerWriter 的上下文，复用四层规划调用。
+            self.state = {
+                **self.state,
+                "plot": {
+                    **self.state["plot"],
+                    "writer_review_context": {"draft": draft, "guidance": guidance},
+                    "story_premise": "",
+                    "exploration_drive": "",
+                    "story_outline": [],
+                    "current_chapter_title": "",
+                    "chapter_goal": "",
+                    "current_chapter_overview": "",
+                    "current_chapter_hooks": [],
+                    "active_outline_chapter_id": "",
+                },
+                "runtime": {**self.state["runtime"], "scene_candidates": []},
+            }
+            self.state = prepare_story_setup(self.state, self.deps)
+            self._stage_writer_review_unlocked()
+            return {"draft": _json_clone(self._writer_review_draft), "state": self.serialize_state()}
 
     def _enable_auto_unlocked(self) -> None:
         # 玩家回合改由 L1 agent 演绎:只设运行时标志,不篡改共享档案 character_profiles。
@@ -550,6 +907,11 @@ class WebGameSession:
         self.last_handoff_reason = "自动模式已开启：玩家角色由核心角色 agent 自动演绎。"
 
     def _disable_auto_unlocked(self) -> None:
+        if self._is_assistant_mode():
+            self._set_assistant_player_unlocked()
+            self.auto_mode = False
+            self.last_handoff_reason = "自动推进已暂停；主角仍由核心角色 Agent 演绎。"
+            return
         self.state = {
             **self.state,
             "player": {**self.state["player"], "enabled": True, "auto_mode": False},
@@ -559,29 +921,92 @@ class WebGameSession:
 
     def auto_step(self, max_beats: int = 4) -> dict[str, Any]:
         with self._lock:
-            if not self.story_initialized:
-                raise RuntimeError("请先初始化场景，再启动自动推进。")
-            if not self.auto_mode:
-                raise RuntimeError("自动模式未开启。")
-            if self.state["runtime"].get("scene_finished", False):
-                raise RuntimeError("当前场景已经结束，请重置后继续。")
-            chapter_before = str(self.state["plot"].get("chapter_id", "") or "")
-            self.state, self.last_handoff_reason = self._controller.advance(
-                self.state,
-                stop_when=never_stop,
-                max_beats=max_beats,
-                max_hops=max_beats + 8,
-                stop_on_chapter_end=True,
+            return self._advance_auto_unlocked(max_beats=max_beats)
+
+    def auto_step_streaming(
+        self,
+        on_event: Callable[[dict[str, Any]], None],
+        max_beats: int = 4,
+    ) -> dict[str, Any]:
+        """自动推进一批 beats,逐条流式发出提交的 history 条目。
+
+        与 ``auto_step`` 逻辑一致,但把 ``on_event`` 透传给控制器,使消费者边生成
+        边收到输出,而非等整批跑完;返回最终全量 state 供客户端在流结束后对账。
+        """
+        with self._lock:
+            _emit = self._make_stream_emitter(on_event)
+            return self._advance_auto_unlocked(max_beats=max_beats, on_event=_emit)
+
+    def _advance_auto_unlocked(
+        self,
+        *,
+        max_beats: int,
+        on_event: Callable[[dict[str, Any]], None] | None = None,
+    ) -> dict[str, Any]:
+        if not self.story_initialized:
+            raise RuntimeError("请先初始化场景，再启动自动推进。")
+        if not self.auto_mode:
+            raise RuntimeError("自动模式未开启。")
+        if self.state["runtime"].get("scene_finished", False):
+            raise RuntimeError("当前场景已经结束，请重置后继续。")
+        advance_kwargs: dict[str, Any] = {
+            "stop_when": never_stop,
+            "max_beats": max_beats,
+            "max_hops": max_beats + 8,
+            "stop_on_chapter_end": True,
+        }
+        if on_event is not None:
+            advance_kwargs["on_event"] = on_event
+        chapter_before = str(self.state["plot"].get("chapter_id", "") or "")
+        self.state, self.last_handoff_reason = self._controller.advance(
+            self.state, **advance_kwargs
+        )
+        # 本批是否因跨章而停:chapter_id 变了即刚进下一章开头,前端据此暂停等确认。
+        self._last_chapter_advanced = (
+            str(self.state["plot"].get("chapter_id", "") or "") != chapter_before
+        )
+        if self._last_chapter_advanced and self._is_assistant_mode():
+            if self.writer_auto_approve:
+                self._last_chapter_advanced = False
+            else:
+                self._stage_writer_review_unlocked()
+                self.auto_mode = False
+        self._persist_generated_world_additions_unlocked()
+        self._maybe_index_finished_scene_unlocked()
+        self._maybe_autosave_unlocked()
+        return self.serialize_state()
+
+    def _make_stream_emitter(
+        self,
+        on_event: Callable[[dict[str, Any]], None],
+    ) -> Callable[[dict[str, Any]], None]:
+        profiles = self.character_profiles
+        player_character = self.config.player_character
+
+        def _emit(entry: dict[str, Any]) -> None:
+            on_event(_serialize_history_entry(entry, player_character, profiles))
+
+        return _emit
+
+    def _maybe_autosave_unlocked(self) -> None:
+        # 自动推进每批后落一条 auto 存档,避免长跑期间进程中断/中途查库看不到进度。
+        # 仅在已绑定存档租户时存;失败绝不能中断游戏推进。
+        if self.active_user_id is None or self.active_player_id is None:
+            return
+        if self.save_store is None:
+            return
+        try:
+            self._save_player_session_unlocked(
+                user_id=self.active_user_id,
+                player_id=self.active_player_id,
+                save_kind="auto",
             )
-            # 本批是否因跨章而停:chapter_id 变了即刚进下一章开头,前端据此暂停等确认。
-            self._last_chapter_advanced = (
-                str(self.state["plot"].get("chapter_id", "") or "") != chapter_before
-            )
-            self._maybe_index_finished_scene_unlocked()
-            return self.serialize_state()
+        except Exception as exc:  # noqa: BLE001 - autosave 失败降级为告警
+            print(f"[WebGameSession] 自动存档失败,已跳过:{exc}", flush=True)
 
     def apply_player_action(self, raw_input: str) -> dict[str, Any]:
         with self._lock:
+            self._require_writer_review_resolved_unlocked()
             if not self.story_initialized:
                 raise RuntimeError("请先初始化场景，再提交玩家动作。")
             if self.state["runtime"].get("scene_finished", False):
@@ -597,6 +1022,7 @@ class WebGameSession:
             self.state, self.last_handoff_reason = self._controller.advance(
                 self.state, stop_when=stop_at_player_turn
             )
+            self._persist_generated_world_additions_unlocked()
             self._maybe_index_finished_scene_unlocked()
             return self.serialize_state()
 
@@ -612,6 +1038,7 @@ class WebGameSession:
         after the stream completes.
         """
         with self._lock:
+            self._require_writer_review_resolved_unlocked()
             if not self.story_initialized:
                 raise RuntimeError("请先初始化场景，再提交玩家动作。")
             if self.state["runtime"].get("scene_finished", False):
@@ -634,6 +1061,7 @@ class WebGameSession:
             self.state, self.last_handoff_reason = self._controller.advance(
                 self.state, stop_when=stop_at_player_turn, on_event=_emit
             )
+            self._persist_generated_world_additions_unlocked()
             self._maybe_index_finished_scene_unlocked()
             return self.serialize_state()
 
@@ -745,6 +1173,10 @@ class WebGameSession:
                 "player": {**self.state["player"], "auto_mode": False},
             }
         self._world_builder = None
+        self._world_chat_history = []
+        self.writer_review_pending = False
+        self._writer_review_draft = None
+        self.writer_auto_approve = False
 
     def _rebuild_session(self, *, initialize_story: bool = False) -> None:
         if self.config.world_setting is not None:
@@ -866,16 +1298,24 @@ class WebGameSession:
             provider.recall_service = self._recall_service
 
     def _initialize_story(self) -> None:
+        if self._is_assistant_mode():
+            self._set_assistant_player_unlocked()
+            self.state = prepare_story_setup(self.state, self.deps)
+            self._stage_writer_review_unlocked()
+            self.story_initialized = True
+            return
         if self.config.mode in {"agent-first", "live"}:
             self.state = prepare_story_setup(self.state, self.deps)
             # 开局就把首场景编排完(seed NPC 上场 + director/scheduler),
             # 让玩家第一次搭话当场就有 NPC 逐条回应,而不是首回合冷场。
             self.state = prepare_chapter_turn(self.state, self.deps)
             self.state = self._controller.prime_opening_turn(self.state)
+            self._persist_generated_world_additions_unlocked()
             self.story_initialized = True
             self.last_handoff_reason = "开场交接完成，等待玩家定义第一步行动。"
             return
         self.state = initialize_story_session(self.state, self.deps)
+        self._persist_generated_world_additions_unlocked()
         self.story_initialized = True
         self.state, self.last_handoff_reason = self._controller.advance(
             self.state, stop_when=stop_at_player_turn
@@ -903,6 +1343,9 @@ class WebGameSession:
         scene_end = runtime.get("scene_end_evaluation") or {}
         payload = {
             "mode": self.config.mode,
+            "experience_mode": self.config.experience_mode,
+            "writer_review_pending": self.writer_review_pending,
+            "writer_auto_approve": self.writer_auto_approve,
             "narration_style_preset": self.deps.gameplay_tuning.narration.style_preset,
             "available_narration_styles": _serialize_narration_style_options(),
             "story_initialized": self.story_initialized,

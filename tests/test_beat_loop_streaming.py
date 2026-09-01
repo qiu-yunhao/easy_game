@@ -132,6 +132,59 @@ class RunBeatLoopStreamingTests(unittest.TestCase):
             ["a-line", "flush-line", "wrap-line"],
         )
 
+    def test_reemits_entry_when_narration_rewrites_it_in_place(self):
+        # 旁白 flush 会就地改写已提交条目的 content/narration_source(见
+        # apply_narrated_segments),_flush 应在改写发生的当刻按 turn 重发,而非漏发。
+        scheduler_step, execution_subgraph = self._make_steps(["a-raw"])
+        state = _state(pending=["a"], on_stage=["a"])
+
+        def flush_step(current):
+            # 把 turn 0 的原始台词就地改写成旁白过渡文本。
+            rewritten = []
+            for entry in current["history"]:
+                if int(entry.get("turn", -1)) == 0:
+                    rewritten.append(
+                        {**entry, "content": "a-narrated", "narration_source": "narrator_agent"}
+                    )
+                else:
+                    rewritten.append(entry)
+            return {**current, "history": rewritten}
+
+        emitted = []
+        run_beat_loop(
+            state,
+            deps=None,
+            scheduler_step=scheduler_step,
+            execution_subgraph=execution_subgraph,
+            flush_step=flush_step,
+            wrap_step=lambda s: s,
+            on_event=emitted.append,
+        )
+        # turn 0 先以原始台词首发,旁白改写后再以过渡文本重发一次。
+        self.assertEqual(
+            [(e.get("turn"), e["content"]) for e in emitted],
+            [(0, "a-raw"), (0, "a-narrated")],
+        )
+
+    def test_unchanged_entries_are_not_reemitted(self):
+        # flush/wrap 只新增条目、不改旧条目时,旧条目不应被重复发。
+        scheduler_step, execution_subgraph = self._make_steps(["a-line", "b-line"])
+        state = _state(pending=["a", "b"], on_stage=["a", "b"])
+        emitted = []
+        run_beat_loop(
+            state,
+            deps=None,
+            scheduler_step=scheduler_step,
+            execution_subgraph=execution_subgraph,
+            flush_step=lambda s: _append(s, "flush-line"),
+            wrap_step=lambda s: s,
+            on_event=emitted.append,
+        )
+        self.assertEqual(
+            [e["content"] for e in emitted],
+            ["a-line", "b-line", "flush-line"],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

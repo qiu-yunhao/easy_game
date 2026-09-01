@@ -158,6 +158,63 @@ class DirectorConflictTriptychTests(unittest.TestCase):
         self.assertGreaterEqual(_sentence_count(next_state["director_brief"]["wrap_up_text"]), 2)
         self.assertIn("裂纹", next_state["director_brief"]["wrap_up_text"])
 
+    def test_triptych_on_cooldown_within_same_scene_is_suppressed(self) -> None:
+        first = _build_state(beat="山门前的对峙陡然压低了空气。")
+        conflict_brief = {
+            "beat": "守门弟子上前阻拦",
+            "beat_goal": "压住来者气势",
+            "focus_character": "guard",
+            "tension_target": 0.45,
+            "allow_interrupt": True,
+            "who_should_respond": ["guard"],
+            "lead_in_text": "空气凝住。",
+            "wrap_up_text": "请选择你的行动。",
+            "stage_actions": {"enter": [], "leave": [], "suppress": [], "unsuppress": []},
+            "notes": [],
+        }
+        after_first = apply_director_brief(first, dict(conflict_brief), _build_profiles())
+        # 第一次落下三段式并记录冷却标记。
+        self.assertGreaterEqual(_sentence_count(after_first["director_brief"]["lead_in_text"]), 2)
+        self.assertEqual(
+            after_first["memory"]["director_memory"]["last_conflict_triptych_scene"], "scene-1"
+        )
+
+        # 紧接着同场景下一拍再来:仍在冷却期,兜底不应再贴,短 lead_in 原样透传。
+        # 保留冲突 beat,确保是"冷却"而非"触发条件消失"导致的抑制。
+        second = {
+            **after_first,
+            "scene": {**after_first["scene"], "beat": "山门前的对峙陡然压低了空气。"},
+            "runtime": {**after_first["runtime"], "turn_index": 1, "resolved_act": None},
+        }
+        after_second = apply_director_brief(second, dict(conflict_brief), _build_profiles())
+        self.assertEqual(after_second["director_brief"]["lead_in_text"], "空气凝住。")
+
+    def test_triptych_fires_again_in_a_new_scene(self) -> None:
+        first = _build_state(beat="山门前的对峙陡然压低了空气。")
+        conflict_brief = {
+            "beat": "守门弟子上前阻拦",
+            "beat_goal": "压住来者气势",
+            "focus_character": "guard",
+            "tension_target": 0.45,
+            "allow_interrupt": True,
+            "who_should_respond": ["guard"],
+            "lead_in_text": "空气凝住。",
+            "wrap_up_text": "请选择你的行动。",
+            "stage_actions": {"enter": [], "leave": [], "suppress": [], "unsuppress": []},
+            "notes": [],
+        }
+        after_first = apply_director_brief(first, dict(conflict_brief), _build_profiles())
+        # 换到新场景(scene_id 变化),即便 turn_index 未过冷却拍数也应重新可发。
+        # 保留场景 beat 里的冲突标记,使第二拍仍满足三段式触发条件。
+        second = {
+            **after_first,
+            "plot": {**after_first["plot"], "scene_id": "scene-2"},
+            "scene": {**after_first["scene"], "beat": "山门前的对峙陡然压低了空气。"},
+            "runtime": {**after_first["runtime"], "turn_index": 1, "resolved_act": None},
+        }
+        after_second = apply_director_brief(second, dict(conflict_brief), _build_profiles())
+        self.assertGreaterEqual(_sentence_count(after_second["director_brief"]["lead_in_text"]), 2)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -266,6 +266,28 @@ def narration_subgraph_node(
         should_force = force_flush
 
 
+def _latest_narration_by_source(state: GameState, source: str) -> str:
+    """最近一条同源(director_lead_in / director_wrap_up)旁白的正文,没有则空串。"""
+    for entry in reversed(state.get("history", [])):
+        if str(entry.get("narration_source", "") or "") == source:
+            return str(entry.get("content", "") or "")
+    return ""
+
+
+def _is_redundant_transition(new_text: str, prior_text: str) -> bool:
+    """新过渡旁白与上一条同源旁白是否近乎重复(含内容雷同的写死兜底段)。"""
+    normalized_new = _normalize_intro_similarity_text(new_text)
+    normalized_prior = _normalize_intro_similarity_text(prior_text)
+    if not normalized_new or not normalized_prior:
+        return False
+    if normalized_new == normalized_prior:
+        return True
+    if SequenceMatcher(None, normalized_new, normalized_prior).ratio() >= 0.84:
+        return True
+    shorter, longer = sorted((normalized_new, normalized_prior), key=len)
+    return len(shorter) >= 18 and shorter in longer
+
+
 def _consume_director_brief_text(
     state: GameState,
     deps: "GraphDependencies",
@@ -276,6 +298,15 @@ def _consume_director_brief_text(
     text = _clean_text(state["director_brief"].get(text_key, ""))
     if not text:
         return state
+    # 与上一条同源过渡旁白近乎重复则跳过落库(仍清空 brief 字段,避免下拍再消费)。
+    if _is_redundant_transition(text, _latest_narration_by_source(state, source)):
+        return {
+            **state,
+            "director_brief": {
+                **state["director_brief"],
+                text_key: "",
+            },
+        }
     next_state = _append_narration_event(
         state=state,
         content=text,

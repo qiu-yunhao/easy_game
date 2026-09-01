@@ -17,5 +17,5 @@ def build_wuxia_world_setting() -> WorldSetting:
         "protagonist": {"character_id": "player", "name": "无名侠客", "role": "protagonist", "start_tier_index": 0, "motivation": "查明师门旧案", "initial_relations": {}, "secrets": ["随身玉佩牵着一段旧案。"]},
         "key_characters": [{"character_id": "mentor", "name": "沈砚", "role": "mentor", "start_tier_index": 1, "motivation": "守住门派最后的传承"}],
         "factions_geography": [{"name": "青石镇", "kind": "location", "description": "江湖起点，商旅与消息交汇。"}, {"name": "听雨楼", "kind": "faction", "description": "表面经营酒楼，暗中搜罗江湖秘闻。"}],
-        "title": "青石江湖", "summary": "一名无名侠客从小镇出发，踏入纠缠的江湖。", "source": "preset", "template_ref": [],
+        "title": "青石江湖", "summary": "一名无名侠客从小镇出发，踏入纠缠的江湖。", "source": "preset", "template_ref": [], "incremental_facts": [],
     }

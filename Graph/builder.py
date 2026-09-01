@@ -142,6 +142,12 @@ def prepare_chapter_turn(state: GameState, deps: GraphDependencies) -> GameState
     )
 
 
+def prepare_chapter_draft(state: GameState, deps: GraphDependencies) -> GameState:
+    """Generate the complete writer package without handing it to the director yet."""
+    # scene_candidates_node already ensures chapter_expansion and all its prerequisites.
+    return scene_candidates_node(state, deps)
+
+
 def initialize_story_session(state: GameState, deps: GraphDependencies) -> GameState:
     return prepare_chapter_turn(prepare_story_setup(state, deps), deps)
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 from typing import TYPE_CHECKING, Any, Callable, Literal
 
@@ -74,6 +75,20 @@ class PlaywrightAgent(BaseAgent):
         tool_runtime: CharacterRosterToolRuntime | None,
     ) -> None:
         self.character_roster_tool_runtime = tool_runtime
+
+    @staticmethod
+    def _with_review_context(instruction: str, game_state: GameState) -> str:
+        context = game_state["plot"].get("writer_review_context")
+        if not isinstance(context, dict):
+            return instruction
+        guidance = str(context.get("guidance", "") or "").strip()[:2_000]
+        draft = json.dumps(context.get("draft", {}), ensure_ascii=False)[:12_000]
+        return (
+            f"{instruction}\n\nUser review guidance: {guidance}\n"
+            "The following is the user's current editable package. Preserve its accepted intent; regenerate only "
+            "where the guidance calls for a change.\n"
+            f"Current package: {draft}"
+        )
 
     def _resolve_template_guidance(
         self,
@@ -240,6 +255,7 @@ class PlaywrightAgent(BaseAgent):
             character_profiles=character_profiles,
             character_roster_tool_runtime=self.character_roster_tool_runtime,
         )
+        instruction = self._with_review_context(instruction, game_state)
         return self._execute_with_retry(
             instruction=instruction,
             correction=(
@@ -269,6 +285,7 @@ class PlaywrightAgent(BaseAgent):
             desired_chapter_count=desired_chapter_count,
             character_roster_tool_runtime=self.character_roster_tool_runtime,
         )
+        instruction = self._with_review_context(instruction, game_state)
         return self._execute_with_retry(
             instruction=instruction,
             correction=(
@@ -322,6 +339,7 @@ class PlaywrightAgent(BaseAgent):
             character_roster_tool_runtime=self.character_roster_tool_runtime,
             template_guidance=template_guidance,
         )
+        instruction = self._with_review_context(instruction, game_state)
         return self._execute_with_retry(
             instruction=instruction,
             correction=(
@@ -359,6 +377,7 @@ class PlaywrightAgent(BaseAgent):
             character_roster_tool_runtime=self.character_roster_tool_runtime,
             template_guidance=template_guidance,
         )
+        instruction = self._with_review_context(instruction, game_state)
         return self._execute_with_retry(
             instruction=instruction,
             correction=(

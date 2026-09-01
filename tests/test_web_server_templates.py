@@ -19,11 +19,22 @@ class _FakeSession:
     def set_selected_template(self, tid):
         self.selected = tid
         return {"selected_template_id": tid}
+    def reset(self, **kwargs):
+        return {"reset": kwargs}
+    def export_runtime_snapshot(self):
+        return {}
+    def bind_save_context(self, **kwargs):
+        return None
+
+
+class _FakeSaveStore:
+    def create_new_game(self, **kwargs):
+        return {"player": {"id": 1}}
 
 
 def _handler():
     h = web_server.StageboundRequestHandler.__new__(web_server.StageboundRequestHandler)
-    h.server = SimpleNamespace(session=_FakeSession(), save_store=None)
+    h.server = SimpleNamespace(session=_FakeSession(), save_store=_FakeSaveStore())
     return h
 
 
@@ -50,6 +61,12 @@ class PostTemplateEndpointsTest(unittest.TestCase):
         h = _handler()
         kwargs = h._build_reset_kwargs({"selected_template_id": 5})
         self.assertEqual(kwargs["selected_template_id"], 5)
+
+    def test_new_game_rejects_genre_shortcut_without_world_builder_draft(self):
+        h = _handler()
+
+        with self.assertRaisesRegex(RuntimeError, "必须先完成世界观完善"):
+            h._handle_post_api_request("/api/new-game", {"user_id": 1, "genre_tag": "xianxia"})
 
 
 if __name__ == "__main__":

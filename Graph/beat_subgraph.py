@@ -121,15 +121,35 @@ def run_beat_loop(
     resolved_turns = 0
 
     # Track how many history entries have already been streamed so each step
-    # only emits the entries it newly committed, in order.
+    # only emits the entries it newly committed, in order.旁白会就地改写已提交
+    # 条目的 content/narration_source(见 apply_narrated_segments),故额外记录已发
+    # 条目的签名,一旦被改写(如攒够一批后 narrate)就在当刻重新 emit,而非憋到最后
+    # 的全量 done——这样承上启下的旁白过渡也能流式到达。
     emitted = len(current.get("history", []))
+
+    def _entry_signature(entry: dict[str, Any]) -> tuple[Any, Any]:
+        return (entry.get("content"), entry.get("narration_source"))
+
+    emitted_signatures: dict[int, tuple[Any, Any]] = {
+        int(entry.get("turn", index)): _entry_signature(entry)
+        for index, entry in enumerate(current.get("history", []))
+    }
 
     def _flush(next_state: GameState) -> GameState:
         nonlocal emitted
         if on_event is None:
             return next_state
         history = next_state.get("history", [])
+        # 先把已发条目里被就地改写(签名变化)的重新 emit,让前端按 turn 覆盖更新。
+        for entry in history[:emitted]:
+            turn = int(entry.get("turn", -1))
+            signature = _entry_signature(entry)
+            if emitted_signatures.get(turn) != signature:
+                emitted_signatures[turn] = signature
+                on_event(entry)
+        # 再首发本步新增的条目。
         for entry in history[emitted:]:
+            emitted_signatures[int(entry.get("turn", emitted))] = _entry_signature(entry)
             on_event(entry)
         emitted = len(history)
         return next_state

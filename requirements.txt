@@ -1,0 +1,16 @@
+# Web/CLI 运行所需
+openai>=3.0,<4
+python-dotenv>=1.0
+SQLAlchemy>=2.0
+
+# 存档库 MySQL
+pymysql>=1.1
+
+# 回忆/RAG 与情节模板：PostgreSQL + pgvector + 本地 bge embedding
+psycopg[binary]>=3.1
+pgvector>=0.3
+langgraph>=0.2
+sentence-transformers>=3.0
+
+# 测试
+pytest>=8

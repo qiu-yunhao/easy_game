@@ -62,3 +62,7 @@ def validate_world_setting(world_setting: Any) -> None:
     protagonist = world_setting.get("protagonist")
     if not isinstance(protagonist, dict) or not str(protagonist.get("name", "") or "").strip():
         raise WorldSettingError("protagonist.name 不能为空。")
+
+    facts = world_setting.get("incremental_facts")
+    if not isinstance(facts, list) or any(not isinstance(item, str) for item in facts):
+        raise WorldSettingError("incremental_facts 必须是字符串数组。")

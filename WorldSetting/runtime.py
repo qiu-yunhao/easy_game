@@ -7,6 +7,8 @@ def world_context(world_setting: dict[str, Any] | None) -> dict[str, str]:
     """Return the small, stable subset of a setting that agents need."""
     setting = world_setting or {}
     progression = setting.get("progression") or {}
+    facts = [str(item).strip() for item in setting.get("incremental_facts", []) if str(item).strip()]
+    places = [str(item.get("name", "") or "").strip() for item in setting.get("factions_geography", []) if isinstance(item, dict)]
     return {
         "genre_tag": str(setting.get("genre_tag", "") or ""),
         "tone": str(setting.get("tone", "") or ""),
@@ -14,6 +16,8 @@ def world_context(world_setting: dict[str, Any] | None) -> dict[str, str]:
         "core_conflict": str(setting.get("core_conflict", "") or ""),
         "power_system": str(setting.get("power_system", "") or ""),
         "progression_name": str(progression.get("system_name", "") or ""),
+        "incremental_facts": "；".join(facts[-8:]),
+        "known_places": "、".join(place for place in places[-8:] if place),
     }
 
 

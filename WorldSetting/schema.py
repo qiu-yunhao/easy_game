@@ -70,6 +70,8 @@ class WorldSetting(TypedDict):
     summary: str
     source: str  # "preset" | "dialogue" | "rag_import"
     template_ref: list[TemplateRef]
+    # 已进入正史的增量世界事实。只能追加，不能以此覆盖开局骨架。
+    incremental_facts: list[str]
 
 
 def build_advance_condition(condition_type: str, **fields: Any) -> AdvanceCondition:
@@ -101,4 +103,5 @@ def build_empty_world_setting() -> WorldSetting:
         "summary": "",
         "source": "dialogue",
         "template_ref": [],
+        "incremental_facts": [],
     }

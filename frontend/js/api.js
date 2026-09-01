@@ -35,4 +35,8 @@ export const api = {
   startWorldBuilder: (genreTag) => postJson("/api/world-builder/start", genreTag ? { genre_tag: genreTag } : {}),
   answerWorldBuilder: (payload) => postJson("/api/world-builder/answer", payload),
   applyWorldBuilder: () => postJson("/api/world-builder/apply", {}),
+  addWorldBuilderReference: (templateId, referenceQuery) => postJson("/api/world-builder/reference", { template_id: templateId, reference_query: referenceQuery || "" }),
+  writerReview: () => getJson("/api/writer-review"),
+  approveWriterReview: (draft) => postJson("/api/writer-review/approve", { draft }),
+  rewriteWriterReview: (draft, guidance) => postJson("/api/writer-review/rewrite", { draft, guidance }),
 };

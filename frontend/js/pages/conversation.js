@@ -16,10 +16,64 @@ const DEFAULT_PROFILE = {
   main_technique: "基础吐纳术",
 };
 
-export function renderConversation(el) {
+const GENRE_LABELS = {
+  xianxia: "修仙",
+  wuxia: "武侠",
+  infinite_flow: "无限流",
+};
+
+async function streamWorldChat(body, { onDelta, onDone } = {}) {
+  const response = await fetch("/api/world-builder/chat", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
+    body,
+  });
+  if (!response.ok || !response.body) {
+    let message = "请求失败。";
+    try { message = (await response.json()).error || message; } catch {}
+    throw new Error(message);
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let final = null;
+  const dispatch = (rawEvent) => {
+    const lines = rawEvent.split("\n");
+    let eventName = "message";
+    const dataLines = [];
+    for (const line of lines) {
+      if (line.startsWith("event:")) eventName = line.slice(6).trim();
+      else if (line.startsWith("data:")) dataLines.push(line.slice(5).trim());
+    }
+    if (!dataLines.length) return;
+    let data;
+    try { data = JSON.parse(dataLines.join("\n")); } catch { return; }
+    if (eventName === "delta") { if (typeof onDelta === "function") onDelta(data.text || ""); }
+    else if (eventName === "done") { final = data; if (typeof onDone === "function") onDone(data); }
+    else if (eventName === "error") { throw new Error(data.error || "处理失败。"); }
+  };
+
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let idx;
+    while ((idx = buffer.indexOf("\n\n")) !== -1) {
+      const rawEvent = buffer.slice(0, idx);
+      buffer = buffer.slice(idx + 2);
+      dispatch(rawEvent);
+    }
+  }
+  if (buffer.trim()) dispatch(buffer);
+  return final;
+}
+
+export function renderConversation(el, { experienceMode = "game" } = {}) {
   // Preserve connection/game across sidebar switches: an active game jumps
   // straight to chat, a connected-but-idle user stays on the save hub (which
   // auto-loads), only a fresh visitor sees the bare connect screen.
+  const mode = experienceMode === "assistant" ? "assistant" : "game";
   let step = appState.activePlayerId ? "chat" : "connect";
 
   const go = (next) => { step = next; render(); };
@@ -27,7 +81,7 @@ export function renderConversation(el) {
   const render = () => {
     el.innerHTML = "";
     if (step === "connect") renderConnect(el, go);
-    else if (step === "newgame") renderNewGame(el, go);
+    else if (step === "newgame") renderNewGame(el, go, mode);
     else renderChat(el);
   };
 
@@ -91,7 +145,7 @@ async function loadAndEnter(playerId, msg, go) {
   }
 }
 
-function renderNewGame(el, go) {
+function renderNewGame(el, go, experienceMode) {
   el.innerHTML = `
     <section class="newgame-form">
       <h2>自定义开局</h2>
@@ -107,6 +161,10 @@ function renderNewGame(el, go) {
         <span>叙事风格</span>
         <select id="ngStyle"><option value="">加载中…</option></select>
       </label>
+      <label class="newgame-field">
+        <span>世界设定起点</span>
+        <select id="ngGenre"><option value="">加载中…</option></select>
+      </label>
       <div class="newgame-actions">
         <button id="ngBack" class="button button-ghost" type="button">返回</button>
         <button id="ngStart" class="button button-primary" type="button">开始游戏</button>
@@ -116,6 +174,7 @@ function renderNewGame(el, go) {
 
   const msg = el.querySelector("#ngMsg");
   const styleSel = el.querySelector("#ngStyle");
+  const genreSel = el.querySelector("#ngGenre");
   const startBtn = el.querySelector("#ngStart");
 
   (async () => {
@@ -133,28 +192,194 @@ function renderNewGame(el, go) {
     }
   })();
 
+  const genreOptions = (worldSettings) =>
+    `<option value="">自定义（从零开始）</option>` +
+    worldSettings.map((w) =>
+      `<option value="${esc(w.genre_tag)}">${esc(GENRE_LABELS[w.genre_tag] || w.title || w.genre_tag)}</option>`).join("");
+
+  (async () => {
+    try {
+      const { world_settings } = await api.listWorldSettings();
+      genreSel.innerHTML = genreOptions(Array.isArray(world_settings) ? world_settings : []);
+    } catch (e) {
+      genreSel.innerHTML = genreOptions(
+        Object.entries(GENRE_LABELS).map(([tag, title]) => ({ genre_tag: tag, title })),
+      );
+      msg.textContent = `世界观选项加载失败：${e.message}`;
+    }
+  })();
+
   el.querySelector("#ngBack").addEventListener("click", () => go("connect"));
 
   startBtn.addEventListener("click", async () => {
     const name = el.querySelector("#ngName").value.trim() || "无名修士";
     const background = el.querySelector("#ngBackground").value.trim();
     const stylePreset = styleSel.value || null;
+    const genreTag = el.querySelector("#ngGenre").value;
     startBtn.disabled = true;
     msg.textContent = "正在开局，可能较久…";
     try {
-      const result = await api.newGame({
+      const gameRequest = {
         user_id: appState.userId,
         slot_name: `${name} 的仙途`,
         save_label: `${name} / 开局快照`,
         player_profile: { ...DEFAULT_PROFILE, name, background, backpack: [] },
         narration_style_preset: stylePreset,
+        experience_mode: experienceMode,
         selected_template_id: appState.selectedTemplateId ?? null,
+      };
+      const view = await api.startWorldBuilder(genreTag);
+      renderWorldChat(el, go, gameRequest, view);
+    } catch (e) {
+      startBtn.disabled = false;
+      msg.textContent = `世界观完善启动失败：${e.message}`;
+    }
+  });
+}
+
+function renderWorldChat(el, go, gameRequest, view) {
+  let latestView = view;
+  let busy = false;
+  let lastUserMessage = "";
+
+  el.innerHTML = `
+    <section class="world-chat-shell">
+      <h2>完善世界观</h2>
+      <div class="world-chat-thread" id="worldChatThread"></div>
+      <div class="world-chat-refs" id="worldChatRefs"></div>
+      <div class="world-chat-composer">
+        <textarea id="worldChatInput" rows="3" placeholder="描述你的世界观，Agent 会分析并逐项确认……"></textarea>
+        <div class="composer-actions">
+          <span id="worldChatStatus" class="chat-status"></span>
+          <button id="worldChatSend" class="button button-primary" type="button">发送</button>
+          <button id="worldChatFinish" class="button button-primary" type="button" hidden>完成并开始游戏</button>
+        </div>
+      </div>
+      <p id="worldChatMsg" class="login-msg"></p>
+    </section>`;
+
+  const thread = el.querySelector("#worldChatThread");
+  const input = el.querySelector("#worldChatInput");
+  const statusEl = el.querySelector("#worldChatStatus");
+  const sendBtn = el.querySelector("#worldChatSend");
+  const finishBtn = el.querySelector("#worldChatFinish");
+  const msgEl = el.querySelector("#worldChatMsg");
+  const refsEl = el.querySelector("#worldChatRefs");
+
+  const appendMsg = (role, text) => {
+    const node = document.createElement("div");
+    node.className = `world-chat-msg ${role}`;
+    node.textContent = text;
+    thread.appendChild(node);
+    thread.scrollTop = thread.scrollHeight;
+    return node;
+  };
+
+  const sync = () => {
+    const complete = latestView?.status === "complete";
+    sendBtn.disabled = busy || complete;
+    input.disabled = busy || complete;
+    finishBtn.hidden = !complete;
+    statusEl.textContent = complete ? "设定已完成，可以开始游戏。" : "";
+  };
+
+  const renderRefs = () => {
+    refsEl.innerHTML = "";
+    const candidates = Array.isArray(latestView?.reference_candidates)
+      ? latestView.reference_candidates
+      : [];
+    candidates.forEach((candidate) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "button button-ghost world-chat-ref";
+      button.textContent = `📚 参考《${candidate.source_title || candidate.template_id}》`;
+      button.addEventListener("click", () => addReference(candidate.template_id, candidate.source_title));
+      refsEl.appendChild(button);
+    });
+  };
+
+  const addReference = async (templateId, title) => {
+    if (busy) return;
+    busy = true;
+    sync();
+    statusEl.textContent = "正在读取参考…";
+    try {
+      const res = await api.addWorldBuilderReference(
+        templateId,
+        latestView?.reference_query || lastUserMessage,
+      );
+      latestView = res?.view || latestView;
+      if (latestView) latestView.reference_candidates = [];
+      appendMsg("system", `已参考《${title || templateId}》，可继续回答当前问题。`);
+      renderRefs();
+      statusEl.textContent = "";
+    } catch (e) {
+      statusEl.textContent = "";
+      msgEl.textContent = e.message;
+    } finally {
+      busy = false;
+      sync();
+    }
+  };
+
+  if (latestView?.question) appendMsg("assistant", latestView.question);
+  sync();
+
+  const send = async () => {
+    const text = input.value.trim();
+    if (!text || busy || latestView?.status === "complete") return;
+    busy = true;
+    lastUserMessage = text;
+    sync();
+    appendMsg("user", text);
+    input.value = "";
+    statusEl.textContent = "Agent 正在分析…";
+    const bubble = appendMsg("assistant", "");
+    try {
+      await streamWorldChat(JSON.stringify({ message: text }), {
+        onDelta: (chunk) => {
+          bubble.textContent += chunk;
+          thread.scrollTop = thread.scrollHeight;
+        },
+        onDone: (data) => {
+          latestView = data?.view || latestView;
+          sync();
+          if (latestView?.question) appendMsg("system", latestView.question);
+          renderRefs();
+        },
       });
+      statusEl.textContent = "";
+      msgEl.textContent = "";
+    } catch (e) {
+      if (!bubble.textContent) bubble.textContent = e.message;
+      statusEl.textContent = "";
+      msgEl.textContent = e.message;
+    } finally {
+      busy = false;
+      sync();
+    }
+  };
+
+  sendBtn.addEventListener("click", send);
+  input.addEventListener("keydown", (ev) => {
+    if (ev.isComposing) return;
+    if (ev.key === "Enter" && !ev.shiftKey) { ev.preventDefault(); send(); }
+  });
+
+  finishBtn.addEventListener("click", async () => {
+    if (busy || latestView?.status !== "complete") return;
+    busy = true;
+    sync();
+    statusEl.textContent = "正在创建存档…";
+    try {
+      const result = await api.newGame({ ...gameRequest, world_setting: latestView.draft });
       appState.activePlayerId = result.player?.id ?? null;
       go("chat");
     } catch (e) {
-      startBtn.disabled = false;
-      msg.textContent = `开局失败：${e.message}`;
+      busy = false;
+      sync();
+      statusEl.textContent = "";
+      msgEl.textContent = `创建存档失败：${e.message}`;
     }
   });
 }

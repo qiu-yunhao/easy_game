@@ -45,6 +45,9 @@ SYSTEM_HANDOFF_MARKERS = (
     "下一步行动",
     "下一步做什么",
 )
+# 同一场景内两次"冲突三段式"兜底旁白之间至少要间隔这么多拍,避免高张力时
+# 每拍都贴同一段引子/余波。跨场景(scene_id 变化)则重新计数。
+CONFLICT_TRIPTYCH_COOLDOWN_BEATS = 3
 
 
 def clamp_float(value: float, min_value: float = 0.0, max_value: float = 1.0) -> float:
@@ -182,17 +185,39 @@ def _build_conflict_wrap_up_text(
     )
 
 
+def _conflict_triptych_on_cooldown(state: GameState) -> bool:
+    """同一场景内距上次三段式兜底不足 CONFLICT_TRIPTYCH_COOLDOWN_BEATS 拍则仍在冷却。"""
+    director_memory = state["memory"].get("director_memory", {})
+    last_scene = str(director_memory.get("last_conflict_triptych_scene", "") or "")
+    current_scene = str(state["plot"].get("scene_id", "") or "")
+    if last_scene != current_scene:
+        return False
+    last_turn = director_memory.get("last_conflict_triptych_turn")
+    if not isinstance(last_turn, (int, float)):
+        return False
+    current_turn = int(state["runtime"].get("turn_index", 0) or 0)
+    return (current_turn - int(last_turn)) < CONFLICT_TRIPTYCH_COOLDOWN_BEATS
+
+
 def _ensure_conflict_triptych(
     state: GameState,
     brief: DirectorBrief,
     *,
     character_profiles: Mapping[str, Mapping[str, Any]] | None,
-) -> DirectorBrief:
+) -> tuple[DirectorBrief, bool]:
+    """按需补齐冲突三段式兜底文本。返回 (brief, 是否真正贴了兜底段)。
+
+    仅当"当前需要三段式"且"冷却已过"时才补写写死的引子/余波;冷却期内直接放行,
+    避免高张力持续时每拍都吐同一段兜底旁白。第二个返回值供调用方决定是否记冷却。
+    """
     if not _requires_conflict_triptych(state, brief):
-        return brief
+        return brief, False
+    if _conflict_triptych_on_cooldown(state):
+        return brief, False
 
     focus_character = brief.get("focus_character") or state["scene"].get("focus_character")
     next_brief = dict(brief)
+    fired = False
     lead_in_text = _clean_text(brief.get("lead_in_text"))
     wrap_up_text = _clean_text(brief.get("wrap_up_text"))
     if _sentence_count(lead_in_text) < 2 or _looks_like_internal_dump(lead_in_text):
@@ -201,6 +226,7 @@ def _ensure_conflict_triptych(
             focus_character=focus_character,
             character_profiles=character_profiles,
         )
+        fired = True
     if (
         _sentence_count(wrap_up_text) < 2
         or _looks_like_internal_dump(wrap_up_text)
@@ -211,7 +237,8 @@ def _ensure_conflict_triptych(
             focus_character=focus_character,
             character_profiles=character_profiles,
         )
-    return next_brief
+        fired = True
+    return next_brief, fired
 
 
 def _normalize_actor_id_sequence(
@@ -488,7 +515,7 @@ def apply_director_brief(
         character_profiles=character_profiles,
         player_character_id=state["player"].get("controlled_character"),
     )
-    normalized = _ensure_conflict_triptych(
+    normalized, triptych_fired = _ensure_conflict_triptych(
         state,
         normalized,
         character_profiles=character_profiles,
@@ -532,8 +559,20 @@ def apply_director_brief(
         pending_response_groups = [[cid] for cid in pending_beat_actors]
     fallback_turns = 0 if pending_beat_actors else int(bool(prioritized_active_on_stage))
 
+    memory = state["memory"]
+    if triptych_fired:
+        memory = {
+            **memory,
+            "director_memory": {
+                **memory.get("director_memory", {}),
+                "last_conflict_triptych_turn": int(state["runtime"].get("turn_index", 0) or 0),
+                "last_conflict_triptych_scene": str(state["plot"].get("scene_id", "") or ""),
+            },
+        }
+
     return {
         **state,
+        "memory": memory,
         "scene": updated_scene,
         "director_brief": normalized,
         "runtime": {

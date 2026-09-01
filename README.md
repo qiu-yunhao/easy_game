@@ -162,22 +162,21 @@ Web 模式默认只使用内存会话；传入 `--database-url` 或设置 `STAGE
 
 ## 运行方式
 
-先安装基础依赖。项目当前没有提交独立的 `requirements.txt`，但从代码路径看，常用依赖至少包括：
+先安装依赖：
 
 ```powershell
-python -m pip install python-dotenv openai pytest
+python -m pip install -r requirements.txt
 ```
 
-如果要启用数据库存档：
+环境配置从 `easy_game/.env.example` 复制为 `easy_game/.env`，把 MySQL root
+密码填到 `MYSQL_URL` 和 `STAGEBOUND_DATABASE_URL` 中的
+`YOUR_MYSQL_PASSWORD` 位置。仅使用 MySQL 存档时，`PG_URL` 与
+`STAGEBOUND_RECALL_DATABASE_URL` 可留空。
+
+初始化 MySQL 库表（会读取 `.env`，自动 `CREATE DATABASE IF NOT EXISTS`）：
 
 ```powershell
-python -m pip install sqlalchemy pymysql
-```
-
-如果要使用 `langgraph` 编译完整图：
-
-```powershell
-python -m pip install langgraph
+python scripts/init_mysql.py
 ```
 
 命令行 Demo：

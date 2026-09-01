@@ -1441,11 +1441,12 @@ textarea {
 .save-slot{text-align:left;padding:12px;flex:0 0 auto}
 .login-msg{opacity:.7;margin-top:12px}
 .select-shell{display:flex;height:100vh;overflow:hidden}
-.sidebar{width:120px;flex:0 0 120px;background:#141b2b;display:flex;flex-direction:column;padding:12px 8px;gap:8px}
-.sidebar-brand{font-weight:600;font-size:13px;padding:4px 6px 10px;opacity:.9}
-.side-item{text-align:left;padding:8px;border-radius:8px;background:transparent;border:0;color:inherit;cursor:pointer;font-size:13px}
-.side-item.is-active{background:#2b3a5b}
-.sidebar-user{margin-top:auto;font-size:11px;opacity:.7;padding:8px 6px;border-top:1px solid #2b3a5b}
+.sidebar{width:120px;flex:0 0 120px;background:#101724;color:#dce6e1;display:flex;flex-direction:column;padding:12px 8px;gap:8px}
+.sidebar-brand{font-weight:700;font-size:14px;padding:4px 6px 10px;color:#f2f7f4}
+.side-item{text-align:left;padding:9px 10px;border-radius:8px;background:transparent;border:1px solid transparent;color:#c7d4ce;cursor:pointer;font-size:13px;transition:background .16s ease,color .16s ease,border-color .16s ease}
+.side-item:hover{background:#1e2940;color:#ffffff}
+.side-item.is-active{background:#295d56;color:#ffffff;font-weight:600;border-color:rgba(197,154,74,.55)}
+.sidebar-user{margin-top:auto;font-size:11px;color:#8fa39c;padding:8px 6px;border-top:1px solid #2b3a5b}
 .workspace{flex:1;padding:16px;overflow:auto;min-height:0}
 .chat-workspace{display:flex;flex-direction:column;gap:12px;max-width:860px;margin:0 auto;height:100%;min-height:0}
 .chat-topbar{display:flex;align-items:center;gap:12px;flex:0 0 auto}
@@ -1453,6 +1454,9 @@ textarea {
 .auto-toggle{display:flex;align-items:center;gap:6px;font-size:13px;opacity:.85;cursor:pointer}
 .tpl-tag{font-size:12px;opacity:.75;padding:2px 10px;border:1px solid #33415580;border-radius:12px}
 .chat-sidecard{border:1px solid #33415580;border-radius:8px;padding:12px;display:flex;flex-direction:column;gap:8px}
+.writer-review{border:1px solid var(--accent);border-radius:10px;padding:12px;background:var(--panel);display:flex;flex-direction:column;gap:8px}
+.writer-review-head{display:flex;justify-content:space-between;gap:12px;font-size:13px}.writer-review-head span{color:var(--muted)}
+.writer-review textarea{width:100%;box-sizing:border-box;padding:10px;font:12px/1.45 ui-monospace,Consolas,monospace;resize:vertical}
 .sidecard-head{display:flex;align-items:baseline;gap:10px}
 .sidecard-realm{font-size:12px;opacity:.7}
 .sidecard-line{font-size:12px;opacity:.8;margin:0}
@@ -1501,3 +1505,14 @@ textarea {
 .newgame-field input,.newgame-field textarea,.newgame-field select{padding:10px;font:inherit;border-radius:8px}
 .newgame-field textarea{resize:vertical}
 .newgame-actions{display:flex;gap:12px;justify-content:flex-end;margin-top:4px}
+.world-chat-shell{max-width:640px;margin:0 auto;height:calc(100vh - 32px);min-height:0;display:flex;flex-direction:column;gap:12px}
+.world-chat-shell h2{margin:0}
+.world-chat-thread{flex:1 1 auto;min-height:160px;overflow-y:auto;display:flex;flex-direction:column;gap:8px;padding:8px}
+.world-chat-msg{padding:8px 12px;border-radius:10px;max-width:86%;white-space:pre-wrap}
+.world-chat-msg.assistant{align-self:flex-start;background:#eef4f0;color:#16211d;border:1px solid var(--line)}
+.world-chat-msg.user{align-self:flex-end;background:#295d56;color:#ffffff}
+.world-chat-msg.system{align-self:center;background:transparent;color:var(--muted);font-size:12px;text-align:center;border:0}
+.world-chat-refs{display:flex;flex-wrap:wrap;gap:8px;flex:0 0 auto}
+.world-chat-ref{font-size:12px}
+.world-chat-composer{flex:0 0 auto}
+.world-chat-composer textarea{width:100%;padding:10px;box-sizing:border-box;resize:vertical}

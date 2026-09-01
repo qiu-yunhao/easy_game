@@ -3,6 +3,9 @@ import { appState } from "../state.js";
 import { openTemplatePicker } from "../components/templatePickerModal.js";
 
 const REQUEST_TIMEOUT_MS = 300000;
+// 逐条上屏的最小间隔:后端并行回应组会把多条 entry 背靠背 flush 到同一帧,
+// 用它把这些条目摊开成逐条出现,而非一次性全部弹出。
+const STREAM_ENTRY_INTERVAL_MS = 280;
 
 const MODE_LABELS = {
   speak: "言语",
@@ -119,10 +122,25 @@ function resolveMessageContent(entry) {
   );
 }
 
+// Signature of everything buildHistoryCard renders, so reconciliation can
+// tell an unchanged card from one the backend rewrote in place (e.g. narration
+// back-filled onto an already-committed turn).
+function historyEntrySignature(entry) {
+  const p = classifyMessage(entry);
+  return [
+    p.channel, p.speaker, p.role, p.primaryBadge,
+    formatTurnLabel(entry?.turn),
+    resolveMessageContent(entry),
+  ].join("");
+}
+
 function buildHistoryCard(entry) {
   const p = classifyMessage(entry);
   const article = document.createElement("article");
   article.className = ["message-card", p.variant, p.tone].filter(Boolean).join(" ");
+  const turn = Number(entry?.turn);
+  if (Number.isFinite(turn)) article.dataset.turn = String(turn);
+  article.dataset.sig = historyEntrySignature(entry);
   article.innerHTML = `
     <div class="message-top">
       <div class="message-copy">
@@ -140,13 +158,14 @@ function buildHistoryCard(entry) {
   return article;
 }
 
-// Stream a player action over SSE. Calls onEntry for each committed history
-// entry, and returns the final full state from the terminating "done" event.
-async function streamAction(body, { onEntry } = {}) {
+// Stream over SSE against `url`. Calls onEntry for each committed history
+// entry (both first-emit and in-place rewrites, keyed by turn), and returns the
+// final full state from the terminating "done" event.
+async function streamAction(url, body, { onEntry } = {}) {
   const controller = new AbortController();
   const timeoutId = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
-    const response = await fetch("/api/action", {
+    const response = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
       body,
@@ -239,6 +258,15 @@ export function renderChat(el) {
         </div>
         <ul id="scBackpack" class="sidecard-backpack"><li class="inventory-empty">暂无物品</li></ul>
       </aside>
+      <section id="writerReview" class="writer-review" hidden>
+        <div class="writer-review-head"><strong>编剧工作台</strong><span>可直接编辑完整规划 JSON</span></div>
+        <textarea id="writerReviewDraft" rows="16" spellcheck="false"></textarea>
+        <textarea id="writerReviewGuidance" rows="3" placeholder="给 PlayerWriter 的修改要求；重新加工时会保留当前稿的意图。"></textarea>
+        <div class="composer-actions">
+          <button id="writerRewrite" class="button button-ghost" type="button">重新加工</button>
+          <button id="writerApprove" class="button button-primary" type="button">通过，交给导演</button>
+        </div>
+      </section>
       <div class="chat-thread" id="storyFeed"><div class="chat-empty">等待剧情开始</div></div>
       <div class="chat-composer">
         <textarea id="playerInput" rows="4" placeholder="描述你想说什么、做什么……"></textarea>
@@ -258,6 +286,11 @@ export function renderChat(el) {
   const saveBtn = el.querySelector("#saveButton");
   const autoToggle = el.querySelector("#autoModeToggle");
   const statusEl = el.querySelector("#chatStatus");
+  const writerReview = el.querySelector("#writerReview");
+  const writerDraft = el.querySelector("#writerReviewDraft");
+  const writerGuidance = el.querySelector("#writerReviewGuidance");
+  const writerRewrite = el.querySelector("#writerRewrite");
+  const writerApprove = el.querySelector("#writerApprove");
 
   let latestState = null;
   let isBusy = false;
@@ -273,23 +306,93 @@ export function renderChat(el) {
       appState.selectedTemplateId ? `模板 #${appState.selectedTemplateId}` : "未使用模板";
   };
 
-  const renderHistoryFull = (history) => {
+  // 增量对账:按 turn 逐条比对已渲染卡片与目标 history——缺失则插入、签名变化
+  // 则原地替换、多余则移除。用于流结束后的 renderState,避免整表 innerHTML 清空
+  // 重建把刚流式进来的 DOM 全部销毁重造(即"二次闪烁")。
+  const reconcileHistory = (history) => {
     const entries = Array.isArray(history) ? history : [];
-    feed.innerHTML = "";
+    const placeholder = feed.querySelector(".chat-empty");
+    if (placeholder) feed.innerHTML = "";
     if (!entries.length) {
       feed.innerHTML = `<div class="chat-empty">等待剧情开始</div>`;
       return;
     }
-    entries.forEach((entry) => feed.appendChild(buildHistoryCard(entry)));
-    window.requestAnimationFrame(() => { feed.scrollTop = feed.scrollHeight; });
+    const targetTurns = new Set(
+      entries.map((entry) => String(Number(entry?.turn))).filter((t) => t !== "NaN"),
+    );
+    feed.querySelectorAll(".message-card").forEach((card) => {
+      if (!targetTurns.has(card.dataset.turn)) card.remove();
+    });
+    let anchor = null;
+    entries.forEach((entry) => {
+      const turn = Number(entry?.turn);
+      const existing = Number.isFinite(turn)
+        ? feed.querySelector(`.message-card[data-turn="${turn}"]`)
+        : null;
+      if (!existing) {
+        const card = buildHistoryCard(entry);
+        if (anchor && anchor.nextSibling) feed.insertBefore(card, anchor.nextSibling);
+        else feed.appendChild(card);
+        anchor = card;
+        return;
+      }
+      if (existing.dataset.sig !== historyEntrySignature(entry)) {
+        const card = buildHistoryCard(entry);
+        feed.replaceChild(card, existing);
+        anchor = card;
+      } else {
+        anchor = existing;
+      }
+    });
   };
 
   const appendHistoryEntry = (entry) => {
     if (!entry) return;
     const placeholder = feed.querySelector(".chat-empty");
     if (placeholder) feed.innerHTML = "";
-    feed.appendChild(buildHistoryCard(entry));
-    window.requestAnimationFrame(() => { feed.scrollTop = feed.scrollHeight; });
+    // 旁白会就地改写已提交条目(如攒够一批后补写过渡),后端会按 turn 重发;
+    // 同 turn 已在流里出现过则原地替换(签名不变则跳过),否则追加,避免重复卡片。
+    const turn = Number(entry?.turn);
+    const existing = Number.isFinite(turn)
+      ? feed.querySelector(`.message-card[data-turn="${turn}"]`)
+      : null;
+    if (existing) {
+      if (existing.dataset.sig === historyEntrySignature(entry)) return;
+      feed.replaceChild(buildHistoryCard(entry), existing);
+    } else {
+      feed.appendChild(buildHistoryCard(entry));
+      window.requestAnimationFrame(() => { feed.scrollTop = feed.scrollHeight; });
+    }
+  };
+
+  // 节流队列:onEntry 把条目推进来,首条立即上屏(单角色 beat 不引入延迟),
+  // 其余按 STREAM_ENTRY_INTERVAL_MS 逐条排开。drain() 在流结束、renderState 对账前
+  // 把积压同步清空并停表,保证最终态立即到位,不与逐条动画打架。
+  const makeEntryQueue = () => {
+    const pending = [];
+    let timer = null;
+    const step = () => {
+      if (!pending.length) { timer = null; return; }
+      appendHistoryEntry(pending.shift());
+      timer = window.setTimeout(step, STREAM_ENTRY_INTERVAL_MS);
+    };
+    const stop = () => {
+      if (timer !== null) { window.clearTimeout(timer); timer = null; }
+    };
+    return {
+      push(entry) {
+        pending.push(entry);
+        if (timer === null) step();
+      },
+      drain() {
+        stop();
+        while (pending.length) appendHistoryEntry(pending.shift());
+      },
+      reset() {
+        stop();
+        pending.length = 0;
+      },
+    };
   };
 
   const renderSideCard = (state) => {
@@ -315,9 +418,15 @@ export function renderChat(el) {
     if (!state) return;
     latestState = state;
     jsonPre.textContent = JSON.stringify(state, null, 2);
-    renderHistoryFull(state.history || []);
+    reconcileHistory(state.history || []);
     renderSideCard(state);
+    autoToggle.nextElementSibling.textContent = state?.experience_mode === "assistant" ? "自动审阅" : "自动";
+    autoToggle.checked = Boolean(
+      state?.experience_mode === "assistant" ? state?.writer_auto_approve : state?.player?.auto_mode,
+    );
     syncControls();
+    if (state?.writer_review_pending && writerReview.hidden) loadWriterReview();
+    if (!state?.writer_review_pending) writerReview.hidden = true;
   };
 
   const syncControls = () => {
@@ -325,12 +434,55 @@ export function renderChat(el) {
     const sceneFinished = Boolean(latestState?.scene_finished);
     const autoActive = autoTimer !== null || chapterPaused;
     const hasDraft = Boolean(input.value.trim());
-    submit.disabled = isBusy || autoActive || !storyInitialized || sceneFinished || !hasDraft;
-    input.disabled = isBusy || autoActive || !storyInitialized || sceneFinished;
+    const reviewing = Boolean(latestState?.writer_review_pending);
+    submit.disabled = isBusy || reviewing || autoActive || !storyInitialized || sceneFinished || !hasDraft;
+    input.disabled = isBusy || reviewing || autoActive || !storyInitialized || sceneFinished;
     saveBtn.disabled = isBusy || autoActive || !storyInitialized || !appState.activePlayerId;
   };
 
   const setBusy = (next) => { isBusy = next; syncControls(); };
+
+  const loadWriterReview = async () => {
+    try {
+      const review = await api.writerReview();
+      writerDraft.value = JSON.stringify(review.draft, null, 2);
+      writerGuidance.value = "";
+      writerReview.hidden = false;
+    } catch (error) {
+      setStatus(error.message || "编剧方案加载失败。");
+    }
+  };
+
+  const readWriterDraft = () => {
+    try { return JSON.parse(writerDraft.value); }
+    catch { throw new Error("编剧方案必须是有效 JSON。") }
+  };
+
+  const handleWriterReview = async (kind) => {
+    let draft;
+    try { draft = readWriterDraft(); }
+    catch (error) { setStatus(error.message); return; }
+    setBusy(true);
+    try {
+      const state = kind === "rewrite"
+        ? await api.rewriteWriterReview(draft, writerGuidance.value.trim())
+        : await api.approveWriterReview(draft);
+      if (kind === "rewrite") {
+        writerDraft.value = JSON.stringify(state.draft, null, 2);
+        if (state.state) renderState(state.state);
+      } else {
+        writerReview.hidden = true;
+        renderState(state);
+        if (state?.experience_mode === "assistant") {
+          chapterPaused = false;
+          startAutoPolling();
+        }
+      }
+      setStatus("");
+    } catch (error) {
+      setStatus(error.message || "编剧工作台操作失败。");
+    } finally { setBusy(false); }
+  };
 
   const handleSave = async () => {
     if (isBusy || !appState.activePlayerId || !latestState?.story_initialized) return;
@@ -362,22 +514,25 @@ export function renderChat(el) {
     }
     setBusy(true);
     setStatus("正在解析意图…");
+    const queue = makeEntryQueue();
     try {
       let firstSeen = false;
-      const state = await streamAction(JSON.stringify({ input: draft }), {
+      const state = await streamAction("/api/action", JSON.stringify({ input: draft }), {
         onEntry: (entry) => {
           if (!firstSeen) {
             firstSeen = true;
             setStatus("正在生成剧情…");
             input.value = "";
           }
-          appendHistoryEntry(entry);
+          queue.push(entry);
         },
       });
+      queue.drain();
       if (state) renderState(state);
       input.value = "";
       setStatus("");
     } catch (error) {
+      queue.reset();
       setStatus(error.message || "行动处理失败。");
     } finally {
       setBusy(false);
@@ -409,9 +564,21 @@ export function renderChat(el) {
     if (autoBusy || chapterPaused) return;
     if (latestState?.scene_finished) { stopAutoMode(); return; }
     autoBusy = true;
+    const epoch = autoEpoch;
+    const queue = makeEntryQueue();
     try {
-      const state = await api.autoStep(4);
-      renderState(state);
+      const state = await streamAction("/api/auto/step", JSON.stringify({ max_beats: 4 }), {
+        onEntry: (entry) => {
+          // 关自动/换局后到达的迟到条目丢弃,避免串档。
+          if (epoch !== autoEpoch) return;
+          setStatus("正在生成剧情…");
+          queue.push(entry);
+        },
+      });
+      if (epoch !== autoEpoch) { queue.reset(); return; }
+      queue.drain();
+      if (state) renderState(state);
+      setStatus("");
       if (state?.scene_finished) {
         stopAutoMode();
       } else if (state?.chapter_paused) {
@@ -420,6 +587,7 @@ export function renderChat(el) {
         syncControls();
       }
     } catch (error) {
+      queue.reset();
       console.error(error);
       stopAutoMode();
     } finally {
@@ -448,6 +616,8 @@ export function renderChat(el) {
     openTemplatePicker(() => refreshTemplateTag()));
   submit.addEventListener("click", handleSubmit);
   saveBtn.addEventListener("click", handleSave);
+  writerRewrite.addEventListener("click", () => handleWriterReview("rewrite"));
+  writerApprove.addEventListener("click", () => handleWriterReview("approve"));
   input.addEventListener("input", syncControls);
   input.addEventListener("keydown", (event) => {
     if (event.isComposing) return;

@@ -7,7 +7,8 @@ export function renderSelect(el) {
     <div class="select-shell">
       <nav class="sidebar">
         <div class="sidebar-brand">Stagebound</div>
-        <button class="side-item is-active" data-view="chat" type="button">💬 对话</button>
+        <button class="side-item is-active" data-view="game" data-mode="game" type="button">🎮 游戏模式</button>
+        <button class="side-item" data-view="assistant" data-mode="assistant" type="button">✍️ 写作模式</button>
         <button class="side-item" data-view="templates" type="button">📚 模板库</button>
         <div class="sidebar-user">👤 ${appState.username || "未连接"}</div>
       </nav>
@@ -16,11 +17,12 @@ export function renderSelect(el) {
 
   const ws = el.querySelector("#workspace");
   const items = el.querySelectorAll(".side-item");
-  const show = (view) => {
-    items.forEach((i) => i.classList.toggle("is-active", i.dataset.view === view));
+  const show = (item) => {
+    items.forEach((i) => i.classList.toggle("is-active", i === item));
     ws.innerHTML = "";
-    (view === "templates" ? renderTemplates : renderConversation)(ws);
+    if (item.dataset.view === "templates") renderTemplates(ws);
+    else renderConversation(ws, { experienceMode: item.dataset.mode || "game" });
   };
-  items.forEach((i) => i.addEventListener("click", () => show(i.dataset.view)));
-  show("chat");
+  items.forEach((i) => i.addEventListener("click", () => show(i)));
+  show(items[0]);
 }

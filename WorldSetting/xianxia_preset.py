@@ -49,4 +49,5 @@ def build_xianxia_world_setting() -> WorldSetting:
         "summary": "出身凡俗，因机缘叩开仙门，踏入修行世界。",
         "source": "preset",
         "template_ref": [],
+        "incremental_facts": [],
     }

@@ -16,5 +16,5 @@ def build_infinite_flow_world_setting() -> WorldSetting:
         "protagonist": {"character_id": "player", "name": "新入局者", "role": "protagonist", "start_tier_index": 0, "motivation": "带着失去的记忆活下去", "initial_relations": {}, "secrets": ["记忆里藏着一次失败轮回的残片。"]},
         "key_characters": [{"character_id": "teammate", "name": "林雾", "role": "teammate", "start_tier_index": 0, "motivation": "寻找失散的搭档"}],
         "factions_geography": [{"name": "废弃医院", "kind": "location", "description": "第一场副本的封闭入口。"}, {"name": "轮回终端", "kind": "faction", "description": "发布规则却从不解释目的的系统。"}],
-        "title": "轮回入口", "summary": "新人被投进第一场规则副本，必须决定信任谁。", "source": "preset", "template_ref": [],
+        "title": "轮回入口", "summary": "新人被投进第一场规则副本，必须决定信任谁。", "source": "preset", "template_ref": [], "incremental_facts": [],
     }

@@ -55,6 +55,26 @@ OPEN_WORLD_PROGRESS_MARKERS = (
 )
 
 
+def apply_writer_review_package(
+    state: GameState,
+    deps: "GraphDependencies",
+    draft: dict[str, object],
+) -> GameState:
+    """Apply an already validated writer review package at the planning boundary."""
+    formatter = getattr(deps.playwright_agent, "formatter", None)
+    if formatter is None:
+        formatter = deps.component_factory.config.playwright_formatter_builder()
+    state = _apply_story_premise(state, dict(draft["story_premise"]), source="user_review")
+    state = _apply_story_outline_brief(state, list(draft["story_outline"]), source="user_review")
+    state = _apply_chapter_expansion(state, dict(draft["chapter_expansion"]), source="user_review")
+    return _apply_scene_candidates(
+        state,
+        list(draft["scene_candidates"]),
+        source="user_review",
+        formatter=formatter,
+    )
+
+
 def _looks_fixed_mainline_text(value: object) -> bool:
     text = _clean_text(value).lower()
     if not text:
